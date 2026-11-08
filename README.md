@@ -88,11 +88,11 @@ See [implementation plan](docs/PLAN.md) and [review notes](docs/REVIEW.md) for d
 
 Restic behavior follows the [official manual](https://restic.readthedocs.io/en/stable/manual_rest.html) and the installed CLI help (tested with restic 0.18.1).
 
-## Imported jobs
+## First launch
 
-The two jobs from `docs/jobs.json` are included as sanitized initial profiles and merged once on the next app startup. Existing profiles are preserved. Select **Full Backup** or **Backup ssh Testing** in the repository selector, then enter the repository password or choose a password file. Passwords from the source JSON are not bundled or saved. The original enabled schedule is not activated; historical backup status and legacy copy options are not migrated.
+A fresh install starts with one blank repository profile. No personal jobs, paths, exclusions, credentials, or schedules are bundled. Configure your repository and credentials before connecting. Existing saved profiles remain available on upgrades; installing a new package does not clear existing webview storage.
 
-Run import regression checks with `node tests/profiles.test.ts` (Node.js 22.18+ or 24+).
+Run profile persistence and clean-start checks with `node tests/profiles.test.ts` (Node.js 22.18+ or 24+).
 
 Choose **System**, **Light**, or **Dark** from the header's **Theme** selector. System is the default and follows OS appearance changes; explicit preferences persist on this device.
 
@@ -108,7 +108,6 @@ Before each operation on an existing repository, the app runs `restic unlock` wi
 
 In **Repository**, enter the **Session password**, then click **Create password file**. The app creates `~/.local/share/tauri-backup-manager/passwords/<profile-id>.password` and saves its absolute path in the profile. The managed directory is created automatically with owner-only permissions (0700). You can still enter an existing password file manually. On Linux and macOS, the new file is created with owner-only permissions (0600); existing files and symlinks are refused. Empty passwords and passwords containing line breaks are rejected. The password is saved exactly as entered, including spaces. The profile is updated to reference this path, so subsequent repository commands use it. The file contains the plaintext repository password: choose a private directory. Windows creation is currently unavailable because a private ACL implementation is not yet provided.
 
-The Full Backup repository is `/mnt/backup/job_1784917153088_ynpdxm8mc`. A one-time migration corrects the original `/mnt/backup` value for that imported profile, preserving custom paths, password-file settings, and removed profiles. Restart the app to load the correction.
 
 ## Cancel long operations
 
@@ -117,7 +116,7 @@ While restic is running, **Cancel operation** appears below the status banner. O
 ## Scheduled backups (Linux)
 
 1. Configure the repository, sources, exclusions, and tags. Set an existing readable **Password file**, or use **Create password file**. Session-only passwords cannot authenticate unattended backups.
-2. Open **Backup → Backup schedule**, select daily or weekly, choose a local time and weekdays, check **Enable scheduled backups**, and click **Save schedule**. Every profile defaults to daily 3:00 AM **disabled**, including Full Backup. No legacy schedule is activated automatically.
+2. Open **Backup → Backup schedule**, select daily or weekly, choose a local time and weekdays, check **Enable scheduled backups**, and click **Save schedule**. Every profile defaults to daily 3:00 AM **disabled**. No legacy schedule is activated automatically.
 3. The panel shows the next timer occurrence, active/waiting state, last result, and the last 100 journal lines (up to 64,000 characters). **Cancel scheduled backup** stops running or queued work. Closing the app does not cancel a scheduled service.
 
 Scheduled jobs always create snapshots; the manual backup dry-run checkbox does not affect them. Automatic maintenance runs after a successful backup when enabled for that profile. Backups run during your systemd user login session, even with the app closed. A persistent timer catches up once after missed runs when the user manager resumes; it does not replay each missed occurrence or wake a sleeping computer. Scheduling before login requires separately configuring systemd user lingering; the app does not change it. Local times and daylight-saving behavior follow systemd and the computer's timezone. Failed runs are recorded without automatic retries.
@@ -149,7 +148,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib scheduler::tests::generate
 cargo test --manifest-path src-tauri/Cargo.toml --test scheduler_headless systemd_user_timer_runs_closed_app_and_catches_up -- --ignored --exact
 ```
 
-The normal headless tests use temporary homes and repositories, cover password-file backups, queued/running cancellation, serialization, validation, and argument forwarding, and do not install timers. The unit verifier creates temporary unit files without activating them. The final, opt-in test needs a real systemd user session and installs uniquely named **runtime** units for generated temporary backup data, verifies app-closed execution and one missed-run catch-up, and removes its units and timer state afterward. It never enables the real Full Backup schedule.
+The normal headless tests use temporary homes and repositories, cover password-file backups, queued/running cancellation, serialization, validation, and argument forwarding, and do not install timers. The unit verifier creates temporary unit files without activating them. The final, opt-in test needs a real systemd user session and installs uniquely named **runtime** units for generated temporary backup data, verifies app-closed execution and one missed-run catch-up, and removes its units and timer state afterward. It never enables a saved user schedule.
 
 ## Automatic maintenance
 

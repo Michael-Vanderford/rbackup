@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import "./App.css";
-import importedProfiles from "./imported-profiles.json";
 import { loadProfiles, type Profile } from "./profiles";
 import SchedulePanel from "./SchedulePanel";
 import { schedulerAction } from "./scheduler";
@@ -11,10 +10,10 @@ type Result = { stdout: string; stderr: string; code: number };
 type Entry = { path: string; type: string; size?: number };
 /** Create a new repository profile with a random UUID and empty connection and backup settings. */
 const blank = (): Profile => ({ id: crypto.randomUUID(), name: "My repository", repository: "", passwordFile: "", sources: "", excludes: "", tags: "" });
-/** Load and import saved profiles. Return a blank profile if none exist or storage, JSON parsing, or validation fails. */
+/** Load saved profiles. Return a blank profile if none exist or storage, JSON parsing, or validation fails. */
 function load(): Profile[] {
   try {
-    const profiles = loadProfiles(localStorage, importedProfiles);
+    const profiles = loadProfiles(localStorage);
     return profiles.length ? profiles : [blank()];
   } catch {
     return [blank()];
@@ -55,7 +54,7 @@ function App() {
   }, [active]);
   const profile = profiles.find(p => p.id === active)!;
   const [password, setPassword] = useState("");
-  const [tab, setTab] = useState("Overview");
+  const [tab, setTab] = useState(profile.repository ? "Overview" : "Repository");
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [connected, setConnected] = useState(false);
   const [selected, setSelected] = useState("");

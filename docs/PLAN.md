@@ -25,17 +25,11 @@ Use the installed restic executable and existing React/Tauri dependencies. Pass 
 
 Do not describe this first implementation as complete coverage of every restic subcommand or production-ready without the remaining platform testing.
 
-## Imported jobs — 2026-11-07
+## Clean first launch
 
-- [x] Import `docs/jobs.json` as two repository profiles on the next app startup.
-- [x] Preserve job IDs, names, destinations, all sources and all 39 full-backup exclusions.
-- [x] Apply a one-time merge without overwriting existing profiles, duplicating IDs, or resurrecting profiles removed after import.
-- [x] Exclude plaintext job passwords from bundled assets and profile storage; enter the password in the session field or configure a password file.
-- [x] Verify import behavior and build.
-
-Imported destinations: **Full Backup** → `/mnt/backup/job_1784917153088_ynpdxm8mc`; **Backup ssh Testing** → `sftp://server-pi3/home/michael/backup`.
-
-The source JSON remains unchanged. Schedule, historical last-backup/status fields and legacy copy/compression options are not treated as current restic state. In particular, Full Backup's enabled schedule is not activated. These require dedicated scheduling/option mapping work before migration.
+- Personal job imports and their path migration have been removed.
+- Fresh installs start with a blank repository profile; existing saved profiles are preserved.
+- Regression checks cover empty storage, persisted profiles, and invalid saved data.
 
 ## Theme support
 
