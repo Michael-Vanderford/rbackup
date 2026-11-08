@@ -2,6 +2,12 @@
 
 A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses real repositories and the `restic` binary on your PATH.
 
+![Backup workflow: choose files, create encrypted snapshots, and restore; optional automatic integrity checks, retention, and pruning follow successful backups.](docs/images/backup-flow.svg)
+
+*Backup workflow overview. Scheduled backups use Linux systemd user timers; manual operations also support Windows.*
+
+![Restic Backup Manager in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
+
 ## Run
 
 Install Node.js, Rust, [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/), and [restic](https://restic.readthedocs.io/en/stable/020_installation.html). Then:

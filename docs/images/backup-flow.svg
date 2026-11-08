@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" role="img" aria-labelledby="title desc">
+  <title id="title">Restic Backup Manager — from files to recovery</title>
+  <desc id="desc">Files are backed up as encrypted restic snapshots. After a successful backup, optional automatic maintenance checks integrity, applies retention, and prunes unused data. Linux systemd timers can run backups with the app closed.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#172b35"/><stop offset="1" stop-color="#11191f"/></linearGradient>
+    <linearGradient id="accent"><stop stop-color="#6ee7b7"/><stop offset="1" stop-color="#7dd3fc"/></linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#fff" stroke-opacity=".035"/></pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="m1 1 5 3-5 3" fill="none" stroke="#70baa8" stroke-width="1.5"/></marker>
+  </defs>
+  <rect width="1200" height="470" rx="24" fill="url(#bg)"/>
+  <rect width="1200" height="470" rx="24" fill="url(#grid)"/>
+  <g font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+    <rect x="48" y="42" width="42" height="42" rx="12" fill="#203d42"/>
+    <path d="m69 51 12 12-12 12-12-12Z" fill="none" stroke="#86e7c4" stroke-width="2"/>
+    <text x="106" y="69" font-size="24" font-weight="650" fill="#f0f7f8">Restic Backup Manager</text>
+    <text x="49" y="130" font-size="38" font-weight="700" letter-spacing="-1" fill="#f0f7f8">Your files. Encrypted. Recoverable.</text>
+    <text x="50" y="160" font-size="16" fill="#a5bbc5">A local desktop workspace for backups, snapshots, and recovery.</text>
+    <g fill="#1d2e37" stroke="#36515d">
+      <rect x="50" y="201" width="290" height="100" rx="14"/>
+      <rect x="455" y="201" width="290" height="100" rx="14"/>
+      <rect x="860" y="201" width="290" height="100" rx="14"/>
+    </g>
+    <g stroke="#70baa8" stroke-width="2" marker-end="url(#arrow)"><path d="M354 251h84"/><path d="M759 251h84"/></g>
+    <g fill="none" stroke="url(#accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M74 232h17l6 7h24v32H74Z"/>
+      <rect x="481" y="241" width="34" height="29" rx="5"/><path d="M488 241v-8a10 10 0 0 1 20 0v8m-10 11v7"/>
+      <path d="m890 233 13-5 13 5v15q0 15-13 22-13-7-13-22Zm5 15 6 6 10-12"/>
+    </g>
+    <g fill="#edf5f7" font-size="19" font-weight="650"><text x="139" y="244">Choose your files</text><text x="533" y="244">Create a snapshot</text><text x="934" y="244">Ready to restore</text></g>
+    <g fill="#a5bbc5" font-size="13"><text x="139" y="269">Sources · exclusions · tags</text><text x="533" y="269">Encrypted restic repository</text><text x="934" y="269">Browse · recover · verify</text></g>
+    <rect x="50" y="326" width="1100" height="57" rx="12" fill="#17382f" stroke="#326553"/>
+    <circle cx="77" cy="354" r="5" fill="#6ee7b7"/>
+    <text x="94" y="360" font-size="14" font-weight="600" fill="#bcf4dc">OPTIONAL AFTER SUCCESSFUL BACKUPS</text>
+    <g fill="#def9ed" font-size="15"><text x="501" y="360">Check integrity</text><text x="751" y="360">Apply retention</text><text x="1000" y="360">Prune</text></g>
+    <g stroke="#70baa8" stroke-width="1.5" marker-end="url(#arrow)"><path d="M660 354h66"/><path d="M919 354h56"/></g>
+    <text x="51" y="426" font-size="13" fill="#a5bbc5">React + Tauri + restic</text>
+    <text x="1149" y="426" text-anchor="end" font-size="13" fill="#a5bbc5">Linux systemd timers keep scheduled backups running with the app closed.</text>
+  </g>
+</svg>
