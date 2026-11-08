@@ -1,0 +1,20 @@
+[
+  {
+    "id": "job_1784917153088_ynpdxm8mc",
+    "name": "Full Backup",
+    "repository": "/mnt/backup/job_1784917153088_ynpdxm8mc",
+    "passwordFile": "",
+    "sources": "/home/michael\n/mnt/share",
+    "excludes": "/home/michael/1234\n/home/michael/2025-05-04 blender\n/home/michael/ai_agent_env\n/home/michael/anaconda3\n/home/michael/Android\n/home/michael/android-studio\n/home/michael/appImages\n/home/michael/backup\n/home/michael/blender\n/home/michael/blender0old\n/home/michael/bridge\n/home/michael/build\n/home/michael/catkin_ws\n/home/michael/Desktop\n/home/michael/Downloads\n/home/michael/etc\n/home/michael/gxloops\n/home/michael/images\n/home/michael/kernel\n/home/michael/ladish-projects\n/home/michael/Library\n/home/michael/linux\n/home/michael/media\n/home/michael/Microsoft\n/home/michael/nfsshare\n/home/michael/nltk_data\n/home/michael/notifications\n/home/michael/notifications_archive\n/home/michael/Public\n/home/michael/python\n/home/michael/share\n/home/michael/snap\n/home/michael/SoftMaker\n/home/michael/System Volume Information\n/home/michael/tmp\n/home/michael/VirtualBox VMs\n/home/michael/vm-images\n/home/michael/vscode-cpptools\n/home/michael/workspace_v11",
+    "tags": ""
+  },
+  {
+    "id": "job_1787162824007_t7l4ko6hd",
+    "name": "Backup ssh Testing",
+    "repository": "sftp://server-pi3/home/michael/backup",
+    "passwordFile": "",
+    "sources": "/home/michael/1234",
+    "excludes": "",
+    "tags": ""
+  }
+]
