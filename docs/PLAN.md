@@ -18,12 +18,25 @@ Use the installed restic executable and existing React/Tauri dependencies. Pass 
 - OS keychain integration and native folder/file pickers.
 - Notification delivery and non-Linux scheduling. Linux user timers and missed-run catch-up are implemented.
 - Streaming progress, cancellation and durable activity history.
-- Credential forms for remote storage providers; test S3, SFTP, REST and rclone on each platform.
+- Guided remote connection setup (future feature; scope below).
 - Large repository pagination/streaming for snapshot file listings.
 - Packaging/signing and cross-platform desktop smoke tests.
 - Advanced restic operations: copy, diff, mount, key management, repair and unlock. These need their own workflows, particularly repair/unlock.
 
 Do not describe this first implementation as complete coverage of every restic subcommand or production-ready without the remaining platform testing.
+
+## Future feature: guided remote connections
+
+Existing repository URLs already pass through to restic. A URL and the repository password file are sufficient when storage authentication is configured externally; the password file unlocks repository encryption and does not supply provider credentials. Scheduled jobs also need access to provider credentials and configuration in their systemd user environment.
+
+- [ ] Add a connection-type selector and guided fields, starting with Azure Blob and rclone, then S3-compatible storage, SFTP, REST, Backblaze B2, Google Cloud Storage and OpenStack Swift. Keep custom repository URLs available.
+- [ ] Generate and display restic repository URLs; preserve existing profiles and URLs without rewriting them.
+- [ ] Support per-profile provider configuration and external credential-file references, keeping typed secrets out of persisted profile metadata and command-line arguments.
+- [ ] Use the same validated connection configuration for manual operations, stale-lock cleanup, automatic maintenance and scheduled backups.
+- [ ] Report missing credentials, rclone executables and configuration files clearly. Reuse the existing connect and explicit initialization workflows.
+- [ ] Add focused checks for URL generation, profile compatibility, credential handling, schedule forwarding and connection-type UI behavior; verify remote backends on supported platforms with disposable repositories.
+
+Continue delegating storage access to restic; no provider SDKs or new storage engine are needed. rclone requires an installed executable and configured remote. Azure requires provider authentication available to restic. See the [official restic backend documentation](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html).
 
 ## Clean first launch
 

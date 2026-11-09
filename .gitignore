@@ -12,8 +12,10 @@ dist
 dist-ssr
 *.local
 
-# Original job export contains repository passwords; sanitized profiles live in src/.
+# Local job exports and machine-specific sync helper are not application source.
 /docs/jobs.json
+/src/imported-profiles.json
+/update.sh
 
 # Editor directories and files
 .vscode/*

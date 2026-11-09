@@ -96,6 +96,8 @@ Run profile persistence and clean-start checks with `node tests/profiles.test.ts
 
 Choose **System**, **Light**, or **Dark** from the header's **Theme** selector. System is the default and follows OS appearance changes; explicit preferences persist on this device.
 
+The desktop app saves its window size and maximized state when closed and restores them on the next launch.
+
 ## Developer documentation
 
 Open [the static developer reference](docs/index.html) directly in a browser for application flow, function and type contracts, supported operations, and documentation maintenance. No documentation server or dependencies are needed. Source functions include JSDoc and rustdoc comments for editor tooltips; the page also explains how to generate Rust API documentation.
