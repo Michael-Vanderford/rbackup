@@ -13,8 +13,11 @@
     "windows": [
       {
         "title": "Restic Backup Manager",
-        "width": 1280,
-        "height": 900,
+        "width": 1100,
+        "height": 760,
+        "maximized": false,
+        "visible": false,
+        "transparent": true,
         "minWidth": 640,
         "minHeight": 600
       }

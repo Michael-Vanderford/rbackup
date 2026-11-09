@@ -6,6 +6,7 @@ mod password_file;
 mod restic;
 #[cfg(target_os = "linux")]
 mod scheduler;
+mod window_state;
 
 /// Dispatch a headless scheduled job before creating a Tauri application/webview.
 /// Malformed scheduled-backup arguments fail instead of opening the GUI.
@@ -113,14 +114,7 @@ async fn create_password_file(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
-                .build(),
-        )
+        .setup(window_state::setup)
         .invoke_handler(tauri::generate_handler![
             run_restic,
             create_password_file,

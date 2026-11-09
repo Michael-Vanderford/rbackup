@@ -96,7 +96,7 @@ Run profile persistence and clean-start checks with `node tests/profiles.test.ts
 
 Choose **System**, **Light**, or **Dark** from the header's **Theme** selector. System is the default and follows OS appearance changes; explicit preferences persist on this device.
 
-The desktop app saves its window size and maximized state when closed and restores them on the next launch.
+The desktop app starts at 1100 × 760 and saves normal window size and position as you resize or move it. Sizes are stored in logical units so changing display scaling does not enlarge the restored window. It restores position before size and shows the window afterward; maximized, minimized, and fullscreen sizes are not restored. Geometry is stored in `window-geometry.json` under Tauri's app configuration directory (`~/.config/com.michael.tauri-backup-manager/` by default on Linux). The previous plugin's window cache is ignored once; repository settings are preserved. Monitor placement depends on the desktop compositor; Wayland may control placement itself.
 
 ## Developer documentation
 
