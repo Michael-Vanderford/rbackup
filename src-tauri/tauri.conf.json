@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Restic Backup Manager",
+  "productName": "Backup Manager for Restic",
   "version": "0.1.0",
   "identifier": "com.michael.tauri-backup-manager",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Restic Backup Manager",
+        "title": "Backup Manager for Restic",
         "width": 1100,
         "height": 760,
         "maximized": false,

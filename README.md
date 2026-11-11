@@ -1,4 +1,4 @@
-# Restic Backup Manager
+# Backup Manager for Restic
 
 A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses real repositories and the `restic` binary on your PATH.
 
@@ -6,7 +6,7 @@ A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses re
 
 *Backup workflow overview. Scheduled backups use Linux systemd user timers; manual operations also support Windows.*
 
-![Restic Backup Manager in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
+![Backup Manager for Restic in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
 
 ## Run
 
@@ -70,7 +70,12 @@ The app remembers the last selected repository and reconnects on startup using i
 
 Remote backend support uses restic repository URLs and credentials inherited from the environment launching the desktop app. No provider-specific credential manager is included. Avoid credentials in URLs because profile metadata is stored unencrypted.
 
+SFTP connections use non-interactive SSH batch mode with strict host-key verification. Set up an SSH key or agent and verify the server's host key outside the app first; missing authentication or unknown/changed host keys fail in the app instead of asking for passwords or host approval. An encrypted SSH key must already be unlocked through an agent. The restic repository password and password file are separate from SSH authentication. These rules apply to stale-lock cleanup, manual backups, automatic maintenance and scheduled backups. On Windows, restic is launched without a console window; native Windows verification is still required for SSH subprocess behavior.
+
+
 ## Validation
+
+Rust build caches live in `src-tauri/target/` and can grow much larger than the source, especially after toolchain or dependency updates. Development builds disable debug symbols and incremental compilation to reduce disk usage (at the cost of slower rebuilds and reduced Rust debugger information). Test builds inherit these settings. To remove all Rust build output, including app executables and installers, run `cargo clean --manifest-path src-tauri/Cargo.toml`; the next build regenerates it. Build output is ignored by Git. For one-off Rust debugging, use `CARGO_PROFILE_DEV_DEBUG=2` when building.
 
 ```sh
 npm run build

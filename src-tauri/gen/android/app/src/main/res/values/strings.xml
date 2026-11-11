@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">"Restic Backup Manager"</string>
-    <string name="main_activity_title">"Restic Backup Manager"</string>
+    <string name="app_name">"Backup Manager for Restic"</string>
+    <string name="main_activity_title">"Backup Manager for Restic"</string>
 </resources>

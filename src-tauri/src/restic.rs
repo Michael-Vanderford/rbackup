@@ -106,6 +106,15 @@ pub fn arguments(r: &Request) -> Result<Vec<String>, String> {
     if !r.password_file.is_empty() {
         a.extend(["--password-file".into(), r.password_file.clone()]);
     }
+    if r.repository.starts_with("sftp:") {
+        // Transport authentication is separate from the restic encryption password.
+        // Keep these options in the shared builder so cleanup and scheduled jobs use them too.
+        a.extend([
+            "-o".into(),
+            "sftp.args=-oBatchMode=yes -oStrictHostKeyChecking=yes -oNumberOfPasswordPrompts=0"
+                .into(),
+        ]);
+    }
     a.push(r.operation.clone());
     match r.operation.as_str() {
         "init" | "snapshots" | "stats" | "unlock" => {}
@@ -319,7 +328,26 @@ pub(crate) fn run_command(
     if r.password_file.is_empty() {
         command.env("RESTIC_PASSWORD", &r.password);
     }
-    capture_command(command, cancelled)
+    if r.repository.starts_with("sftp:") {
+        command.env("SSH_ASKPASS_REQUIRE", "never");
+    }
+    let mut result = capture_command(command, cancelled)?;
+    if r.repository.starts_with("sftp:") && result.code != 0 && result.code != 130 {
+        let error = result.stderr.to_ascii_lowercase();
+        if [
+            "permission denied",
+            "host key verification failed",
+            "read_passphrase",
+            "no supported authentication",
+            "unable to authenticate",
+        ]
+        .iter()
+        .any(|message| error.contains(message))
+        {
+            result.stderr.push_str("\nSFTP requires non-interactive SSH authentication and a verified host key. Configure an SSH key or agent and verify the server in your SSH known_hosts file outside the app. The repository password/password file only unlocks restic encryption; it does not sign in to the SSH server. No password, key-passphrase, or host-trust prompt is opened by the app.\n");
+        }
+    }
+    Ok(result)
 }
 
 /// Drain both output pipes while polling for cancellation. On Unix, interrupt restic
@@ -336,6 +364,13 @@ fn capture_command(mut command: Command, cancelled: &AtomicBool) -> Result<Outpu
             stderr: "Operation cancelled.".into(),
             code: 130,
         });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Restic is a console executable, but all interaction belongs in the desktop UI.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = command
         .stdout(Stdio::piped())
@@ -559,6 +594,106 @@ mod tests {
         r.keep_last = u32::MAX;
         assert!(arguments(&r).is_err());
     }
+    #[test]
+    fn sftp_authentication_is_noninteractive_for_every_operation() {
+        for repository in ["sftp:user@host:/backup", "sftp://user@host:2222//backup"] {
+            let mut r = request(Path::new("/unused"), "snapshots");
+            r.repository = repository.into();
+            r.paths = vec![std::env::temp_dir().to_str().unwrap().into()];
+            r.keep_last = 3;
+            for operation in [
+                "init",
+                "snapshots",
+                "unlock",
+                "backup",
+                "check",
+                "forget",
+                "prune",
+            ] {
+                r.operation = operation.into();
+                r.confirmation = if operation == "forget" {
+                    "FORGET"
+                } else {
+                    "PRUNE"
+                }
+                .into();
+                let args = arguments(&r).unwrap();
+                assert!(args.windows(2).any(|pair| pair == ["--repo", repository]));
+                assert!(args.windows(2).any(|pair| pair == ["-o", "sftp.args=-oBatchMode=yes -oStrictHostKeyChecking=yes -oNumberOfPasswordPrompts=0"]));
+                assert!(!args.iter().any(|arg| arg.contains(&r.password)));
+                assert!(
+                    !args
+                        .iter()
+                        .any(|arg| arg.contains("StrictHostKeyChecking=no"))
+                );
+            }
+            r.operation = "snapshots".into();
+            let mut operations = Vec::new();
+            execute_with(&r, |step, args| {
+                assert!(args.iter().any(|arg| arg.contains("BatchMode=yes")));
+                operations.push(step.operation.clone());
+                Ok(Output {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    code: 0,
+                })
+            })
+            .unwrap();
+            assert_eq!(operations, ["unlock", "snapshots"]);
+        }
+        for repository in [
+            "/backup",
+            "s3:https://host/bucket",
+            "rclone:remote:backup",
+            "rest:https://host/backup",
+        ] {
+            let mut r = request(Path::new("/unused"), "snapshots");
+            r.repository = repository.into();
+            assert!(
+                !arguments(&r)
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg.starts_with("sftp.args="))
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sftp_failure_reports_ssh_setup_separately_from_repository_password() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!(
+            "sftp-diagnostic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let executable = directory.join("fake-restic");
+        std::fs::write(&executable, "#!/bin/sh\ntest \"$SSH_ASKPASS_REQUIRE\" = never || exit 99\necho 'Permission denied (publickey).' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut r = request(Path::new("/unused"), "snapshots");
+        r.repository = "sftp:user@host:/backup".into();
+        let output = run_command(
+            &r,
+            arguments(&r).unwrap(),
+            &AtomicBool::new(false),
+            &executable,
+        )
+        .unwrap();
+        assert_eq!(output.code, 1);
+        assert!(output.stderr.contains("Permission denied"));
+        assert!(
+            output
+                .stderr
+                .contains("repository password/password file only unlocks restic encryption")
+        );
+        assert!(!output.stderr.contains(&r.password));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn automatic_maintenance_orders_steps_and_stops_on_failure() {
         let mut r = request(Path::new("/tmp/repository"), "backup");

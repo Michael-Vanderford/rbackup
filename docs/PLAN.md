@@ -29,6 +29,8 @@ Do not describe this first implementation as complete coverage of every restic s
 
 Existing repository URLs already pass through to restic. A URL and the repository password file are sufficient when storage authentication is configured externally; the password file unlocks repository encryption and does not supply provider credentials. Scheduled jobs also need access to provider credentials and configuration in their systemd user environment.
 
+- [x] Make existing SFTP connections non-interactive in the shared command builder: SSH batch mode, strict host-key verification, no password prompts, and in-app authentication guidance. Suppress restic's Windows console window. This applies to cleanup, manual operations, maintenance and scheduled jobs without changing saved profiles.
+- [ ] Add guided SSH identity/agent and known-host configuration alongside other provider credential-file references. Keep SSH authentication separate from repository encryption; do not add arbitrary shell commands, password-in-URL storage, or automatic host-key acceptance.
 - [ ] Add a connection-type selector and guided fields, starting with Azure Blob and rclone, then S3-compatible storage, SFTP, REST, Backblaze B2, Google Cloud Storage and OpenStack Swift. Keep custom repository URLs available.
 - [ ] Generate and display restic repository URLs; preserve existing profiles and URLs without rewriting them.
 - [ ] Support per-profile provider configuration and external credential-file references, keeping typed secrets out of persisted profile metadata and command-line arguments.
