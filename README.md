@@ -51,7 +51,7 @@ npm ci
 npm run tauri -- build --bundles nsis,msi
 ```
 
-The setup executable is under `src-tauri/target/release/bundle/nsis/`, the MSI is under `src-tauri/target/release/bundle/msi/`, and the application executable is `src-tauri/target/release/tauri-backup-manager.exe`. Building MSI packages also requires the Windows VBScript optional feature. For an executable without an installer, use `npm run tauri -- build --no-bundle`.
+The setup executable is under `src-tauri/target/release/bundle/nsis/`, the MSI is under `src-tauri/target/release/bundle/msi/`, and the application executable is `src-tauri/target/release/rbackup.exe`. Building MSI packages also requires the Windows VBScript optional feature. For an executable without an installer, use `npm run tauri -- build --no-bundle`.
 
 Install restic separately and make `restic.exe` available on PATH on the destination computer. Windows supports manual repository operations; systemd scheduling and managed password-file creation are currently unavailable. You can use an existing password file or a session password.
 
@@ -101,7 +101,7 @@ Run profile persistence and clean-start checks with `node tests/profiles.test.ts
 
 Choose **System**, **Light**, or **Dark** from the header's **Theme** selector. System is the default and follows OS appearance changes; explicit preferences persist on this device.
 
-The desktop app starts at 1100 × 760 and saves normal window size and position as you resize or move it. Sizes are stored in logical units so changing display scaling does not enlarge the restored window. It restores position before size and shows the window afterward; maximized, minimized, and fullscreen sizes are not restored. Geometry is stored in `window-geometry.json` under Tauri's app configuration directory (`~/.config/com.michael.tauri-backup-manager/` by default on Linux). The previous plugin's window cache is ignored once; repository settings are preserved. Monitor placement depends on the desktop compositor; Wayland may control placement itself.
+The desktop app starts at 1100 × 760 and saves normal window size and position as you resize or move it. Sizes are stored in logical units so changing display scaling does not enlarge the restored window. It restores position before size and shows the window afterward; maximized, minimized, and fullscreen sizes are not restored. Geometry that fills the monitor work area (within decoration margins) is also excluded because native maximize-state notifications can lag resize events. Existing screen-filling caches fall back to the default size; manually resized windows that fill the work area follow the same rule. Geometry is stored in `window-geometry.json` under Tauri's app configuration directory (`~/.config/com.michael.tauri-backup-manager/` by default on Linux). The previous plugin's window cache is ignored once; repository settings are preserved. Monitor placement depends on the desktop compositor; Wayland may control placement itself.
 
 ## Developer documentation
 

@@ -45,7 +45,7 @@ impl Fixture {
         .unwrap();
     }
     fn command(&self, id: &str) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_tauri-backup-manager"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rbackup"));
         command
             .args(["--scheduled-backup", id])
             .env("HOME", &self.home)
@@ -369,7 +369,7 @@ fn systemd_user_timer_runs_closed_app_and_catches_up() {
     let service = format!(
         "[Service]\nType=oneshot\nEnvironment={}\nExecStart={} --scheduled-backup timer-test\nTimeoutStartSec=infinity\nTimeoutStopSec=15s\nKillMode=mixed\nKillSignal=SIGINT\nUMask=0077\n",
         quote(&format!("HOME={}", fixture.home.display())),
-        quote(env!("CARGO_BIN_EXE_tauri-backup-manager"))
+        quote(env!("CARGO_BIN_EXE_rbackup"))
     );
     let date = |seconds: u32| {
         let output = Command::new("date")

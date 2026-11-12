@@ -19,6 +19,13 @@ impl Default for Geometry {
     }
 }
 impl Geometry {
+    fn fills_work_area(&self, width: u32, height: u32, scale: f64) -> bool {
+        // State notifications can lag resize events. Allow for window decorations,
+        // using the same margins as restoration below.
+        self.width * scale >= f64::from(width) - 40.0 * scale
+            && self.height * scale >= f64::from(height) - 80.0 * scale
+    }
+
     fn resize(&mut self, width: u32, height: u32, scale: f64, normal: bool) {
         if normal && width > 0 && height > 0 && scale.is_finite() && scale > 0.0 {
             self.width = f64::from(width) / scale;
@@ -68,6 +75,10 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(monitor) = target {
         let area = monitor.work_area();
         let scale = monitor.scale_factor();
+        if geometry.fills_work_area(area.size.width, area.size.height, scale) {
+            // Recover caches polluted by a maximize transition in older versions.
+            geometry = Geometry::default();
+        }
         // Leave space for decorations and panels instead of filling the display.
         geometry.width = geometry
             .width
@@ -138,12 +149,39 @@ fn observe(window: &WebviewWindow, event: &WindowEvent) {
             );
         }
         WindowEvent::Moved(position)
-            if !window.is_maximized().unwrap_or(true) && !window.is_minimized().unwrap_or(true) =>
+            if !window.is_maximized().unwrap_or(true)
+                && !window.is_minimized().unwrap_or(true)
+                && !window.is_fullscreen().unwrap_or(true) =>
         {
+            // Move notifications can precede the maximized-state update too.
+            if let (Ok(size), Ok(scale), Ok(Some(monitor))) = (
+                window.inner_size(),
+                window.scale_factor(),
+                window.current_monitor(),
+            ) {
+                let mut current = geometry.clone();
+                current.resize(size.width, size.height, scale, true);
+                let area = monitor.work_area();
+                if current.fills_work_area(
+                    area.size.width,
+                    area.size.height,
+                    monitor.scale_factor(),
+                ) {
+                    return;
+                }
+            }
             geometry.position = Some((position.x, position.y));
         }
 
         _ => {}
+    }
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let area = monitor.work_area();
+        if geometry.fills_work_area(area.size.width, area.size.height, monitor.scale_factor()) {
+            // A resize may arrive before is_maximized() reflects the native state.
+            // Retain both the normal size and position through that transition.
+            *geometry = previous.clone();
+        }
     }
     if *geometry != previous || matches!(event, WindowEvent::CloseRequested { .. }) {
         // Save events immediately, so dev-server restarts and process exits cannot lose a resize.
@@ -166,6 +204,35 @@ fn observe(window: &WebviewWindow, event: &WindowEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn detects_maximized_geometry_even_before_state_notification() {
+        for scale in [1.0, 1.5, 2.0] {
+            let mut geometry = Geometry::default();
+            geometry.resize(
+                (2032.0 * scale) as u32,
+                (1163.0 * scale) as u32,
+                scale,
+                true,
+            );
+            assert!(geometry.fills_work_area(
+                (2032.0 * scale) as u32,
+                (1200.0 * scale) as u32,
+                scale
+            ));
+            assert!(!Geometry::default().fills_work_area(
+                (2032.0 * scale) as u32,
+                (1200.0 * scale) as u32,
+                scale
+            ));
+            // A window tiled to half of the display is still normal geometry.
+            geometry.width /= 2.0;
+            assert!(!geometry.fills_work_area(
+                (2032.0 * scale) as u32,
+                (1200.0 * scale) as u32,
+                scale
+            ));
+        }
+    }
     #[test]
     fn keeps_last_normal_size_in_logical_units() {
         let mut geometry = Geometry::default();
