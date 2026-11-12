@@ -2,6 +2,8 @@ use tauri::Manager;
 
 #[cfg(target_os = "linux")]
 mod coordination;
+#[cfg(target_os = "linux")]
+mod mount;
 mod password_file;
 mod restic;
 #[cfg(target_os = "linux")]
@@ -94,6 +96,50 @@ fn cancel_restic() -> Result<(), String> {
     restic::cancel()
 }
 
+#[tauri::command]
+async fn snapshot_mount(
+    app: tauri::AppHandle,
+    action: String,
+    request: Option<restic::Request>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            mount::action(&app, &action, request)
+                .and_then(|info| serde_json::to_value(info).map_err(|e| e.to_string()))
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, action, request);
+        Err("Snapshot mounting currently requires Linux and FUSE. Use the snapshot browser to restore files on this platform.".into())
+    }
+}
+
+#[tauri::command]
+async fn snapshot_mount_entries(
+    app: tauri::AppHandle,
+    snapshot: String,
+    directory: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            mount::entries(&app, &snapshot, &directory)
+                .and_then(|entries| serde_json::to_value(entries).map_err(|e| e.to_string()))
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, snapshot, directory);
+        Err("Snapshot mounting currently requires Linux and FUSE.".into())
+    }
+}
+
 /// Save the explicitly supplied session password to a new private password file.
 #[tauri::command]
 async fn create_password_file(
@@ -112,15 +158,28 @@ async fn create_password_file(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Initialize Tauri, register the opener plugin and run_restic command, then enter the application event loop. Panics if the Tauri application cannot run.
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "linux")]
+    let builder = builder.manage(mount::MountState::default());
+    builder
         .plugin(tauri_plugin_opener::init())
         .setup(window_state::setup)
         .invoke_handler(tauri::generate_handler![
+            snapshot_mount,
+            snapshot_mount_entries,
             run_restic,
             create_password_file,
             cancel_restic,
             scheduler_action
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "linux")]
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<mount::MountState>().stop();
+            }
+            #[cfg(not(target_os = "linux"))]
+            let _ = (app, event);
+        });
 }

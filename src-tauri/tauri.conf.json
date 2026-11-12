@@ -12,7 +12,8 @@
   "app": {
     "windows": [
       {
-        "title": "Backup Manager for Restic",
+        "title": "rbackup",
+        "create": false,
         "width": 1100,
         "height": 760,
         "maximized": false,
@@ -28,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "shortDescription": "Backup Manager for Restic",
     "targets": "all",
     "linux": {
       "deb": {

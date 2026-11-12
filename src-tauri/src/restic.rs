@@ -57,6 +57,11 @@ pub struct Request {
     pub target: String,
     #[serde(default)]
     pub include: String,
+    /// A literal snapshot file or folder, rather than a glob pattern.
+    #[serde(default)]
+    pub restore_path: String,
+    #[serde(default)]
+    pub restore_paths: Vec<String>,
     #[serde(default)]
     pub dry_run: bool,
     #[serde(default)]
@@ -174,6 +179,38 @@ pub fn arguments(r: &Request) -> Result<Vec<String>, String> {
                 "--overwrite".into(),
                 "never".into(),
             ]);
+            let mut selections = r.restore_paths.clone();
+            if !r.restore_path.is_empty() {
+                selections.push(r.restore_path.clone());
+            }
+            if !selections.is_empty() && !r.include.is_empty() {
+                return Err(
+                    "Choose literal restore selections or an include pattern, not both.".into(),
+                );
+            }
+            for path in &selections {
+                if !path.starts_with('/')
+                    || path.contains('\0')
+                    || path.split('/').any(|part| part == "..")
+                {
+                    return Err("Restore selection must be an absolute snapshot path without parent traversal.".into());
+                }
+            }
+            // A selected folder includes descendants. Root means the whole snapshot.
+            if !selections.iter().any(|path| path == "/") {
+                selections.sort();
+                selections.dedup();
+                for path in selections {
+                    let mut literal = String::new();
+                    for ch in path.chars() {
+                        if matches!(ch, '\\' | '*' | '?' | '[' | ']') {
+                            literal.push('\\');
+                        }
+                        literal.push(ch);
+                    }
+                    a.extend(["--include".into(), literal]);
+                }
+            }
             if !r.include.is_empty() {
                 a.extend(["--include".into(), r.include.clone()]);
             }
@@ -219,7 +256,7 @@ pub fn arguments(r: &Request) -> Result<Vec<String>, String> {
     Ok(a)
 }
 
-/// Acquire a process-wide nonblocking job lock, validate arguments, and run restic from PATH with stdin closed. Remove inherited RESTIC_PASSWORD_COMMAND, RESTIC_PASSWORD_FILE, and RESTIC_PASSWORD; set the request password only when no password file is supplied. Run stale-only unlock before existing-repository operations, aborting if cleanup fails. Capture operation output until exit. Validation, lock, and process launch failures return string errors; nonzero process exits remain Output values.
+/// Acquire a process-wide nonblocking job lock, validate arguments, and run restic from PATH with stdin closed. Remove inherited RESTIC_PASSWORD_COMMAND, RESTIC_PASSWORD_FILE, and RESTIC_PASSWORD; set the request password only when no password file is supplied. Run stale-only unlock before existing-repository operations except read-only directory listings, aborting if cleanup fails. Capture operation output until exit. Validation, lock, and process launch failures return string errors; nonzero process exits remain Output values.
 pub fn execute(r: Request) -> Result<Output, String> {
     // Keep the IPC guard as well as the cross-process lock.
     static JOB: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -241,7 +278,7 @@ pub fn execute(r: Request) -> Result<Output, String> {
 }
 
 /// Validate before modifying the repository, then remove only locks restic considers stale.
-/// Skip cleanup for initialization and version queries; abort if cleanup fails.
+/// Skip cleanup for initialization, version queries and read-only directory listings; abort if cleanup fails.
 pub(crate) fn execute_with(
     r: &Request,
     mut run: impl FnMut(&Request, Vec<String>) -> Result<Output, String>,
@@ -271,7 +308,7 @@ pub(crate) fn execute_with(
             maintenance.push(step);
         }
     }
-    if !matches!(r.operation.as_str(), "init" | "version" | "unlock") {
+    if !matches!(r.operation.as_str(), "init" | "version" | "unlock" | "ls") {
         let mut cleanup = r.clone();
         cleanup.operation = "unlock".into();
         let unlocked = run(&cleanup, arguments(&cleanup)?)?;
@@ -318,19 +355,7 @@ pub(crate) fn run_command(
     cancelled: &AtomicBool,
     executable: &Path,
 ) -> Result<Output, String> {
-    let mut command = Command::new(executable);
-    command.args(args).stdin(Stdio::null());
-    // Do not accidentally run a password command inherited from the launching shell.
-    command
-        .env_remove("RESTIC_PASSWORD_COMMAND")
-        .env_remove("RESTIC_PASSWORD_FILE")
-        .env_remove("RESTIC_PASSWORD");
-    if r.password_file.is_empty() {
-        command.env("RESTIC_PASSWORD", &r.password);
-    }
-    if r.repository.starts_with("sftp:") {
-        command.env("SSH_ASKPASS_REQUIRE", "never");
-    }
+    let command = command(r, &args, executable);
     let mut result = capture_command(command, cancelled)?;
     if r.repository.starts_with("sftp:") && result.code != 0 && result.code != 130 {
         let error = result.stderr.to_ascii_lowercase();
@@ -348,6 +373,24 @@ pub(crate) fn run_command(
         }
     }
     Ok(result)
+}
+
+/// Build app-owned restic processes with identical credential and SSH handling.
+pub(crate) fn command(r: &Request, args: &[String], executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command.args(args).stdin(Stdio::null());
+    // Do not accidentally run a password command inherited from the launching shell.
+    command
+        .env_remove("RESTIC_PASSWORD_COMMAND")
+        .env_remove("RESTIC_PASSWORD_FILE")
+        .env_remove("RESTIC_PASSWORD");
+    if r.password_file.is_empty() {
+        command.env("RESTIC_PASSWORD", &r.password);
+    }
+    if r.repository.starts_with("sftp:") {
+        command.env("SSH_ASKPASS_REQUIRE", "never");
+    }
+    command
 }
 
 /// Drain both output pipes while polling for cancellation. On Unix, interrupt restic
@@ -570,6 +613,212 @@ mod tests {
         ls.directory = nested.to_str().unwrap().into();
         let listing = success(ls);
         assert!(listing.stdout.contains("deep.txt"));
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn browsing_skips_unlock_and_restore_selection_is_literal() {
+        let mut r = request(Path::new("/tmp/repo"), "ls");
+        r.snapshot = "12345678".into();
+        let mut calls = Vec::new();
+        execute_with(&r, |step, _| {
+            calls.push(step.operation.clone());
+            Ok(Output {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: 0,
+            })
+        })
+        .unwrap();
+        assert_eq!(calls, ["ls"]);
+        r.operation = "restore".into();
+        r.target = "/tmp/rbackup-new-destination".into();
+        r.restore_path = "/folder/report[1]*?.txt".into();
+        let args = arguments(&r).unwrap();
+        assert_eq!(args.last().unwrap(), r"/folder/report\[1\]\*\?.txt");
+        for path in ["relative", "/folder/../file", "/bad\0path"] {
+            r.restore_path = path.into();
+            assert!(arguments(&r).is_err());
+        }
+    }
+
+    #[test]
+    fn multi_restore_uses_literal_includes_and_root_means_all() {
+        let mut r = request(Path::new("/tmp/repo"), "restore");
+        r.snapshot = "12345678".into();
+        r.target = "/tmp/rbackup-new-destination".into();
+        r.restore_paths = vec!["/documents/a[1].txt".into(), "/photos".into()];
+        let args = arguments(&r).unwrap();
+        assert_eq!(args.iter().filter(|arg| *arg == "--include").count(), 2);
+        assert!(args.contains(&r"/documents/a\[1\].txt".into()));
+        r.restore_paths.push("/".into());
+        assert!(!arguments(&r).unwrap().iter().any(|arg| arg == "--include"));
+        r.restore_paths.push("/../outside".into());
+        assert!(arguments(&r).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires restic on PATH; creates only a disposable temporary repository"]
+    fn real_restic_literal_file_and_folder_restore() {
+        let base = std::env::temp_dir().join(format!(
+            "selective-restore-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = base.join("source");
+        let folder = source.join("folder[1]");
+        let repository = base.join("repository");
+        std::fs::create_dir_all(&folder).unwrap();
+        let selected = source.join("report[1]*?.txt");
+        let sibling = source.join("report1-any.txt");
+        std::fs::write(&selected, "exact file").unwrap();
+        std::fs::write(&sibling, "must not restore").unwrap();
+        std::fs::write(folder.join("nested.txt"), "nested data").unwrap();
+        success(request(&repository, "init"));
+        let mut backup = request(&repository, "backup");
+        backup.paths = vec![source.to_str().unwrap().into()];
+        success(backup);
+        let snapshots: serde_json::Value =
+            serde_json::from_str(&success(request(&repository, "snapshots")).stdout).unwrap();
+        let mut restore = request(&repository, "restore");
+        restore.snapshot = snapshots[0]["id"].as_str().unwrap().into();
+        let file_target = base.join("file-restore");
+        restore.target = file_target.to_str().unwrap().into();
+        restore.restore_path = selected.to_str().unwrap().into();
+        success(restore.clone());
+        assert_eq!(
+            std::fs::read_to_string(file_target.join(selected.strip_prefix("/").unwrap())).unwrap(),
+            "exact file"
+        );
+        assert!(
+            !file_target
+                .join(sibling.strip_prefix("/").unwrap())
+                .exists()
+        );
+        assert!(!file_target.join(folder.strip_prefix("/").unwrap()).exists());
+        let folder_target = base.join("folder-restore");
+        restore.target = folder_target.to_str().unwrap().into();
+        restore.restore_path = folder.to_str().unwrap().into();
+        success(restore);
+        assert_eq!(
+            std::fs::read_to_string(
+                folder_target
+                    .join(folder.strip_prefix("/").unwrap())
+                    .join("nested.txt")
+            )
+            .unwrap(),
+            "nested data"
+        );
+        assert!(
+            !folder_target
+                .join(selected.strip_prefix("/").unwrap())
+                .exists()
+        );
+        let multi_target = base.join("multi-restore");
+        let mut multi = request(&repository, "restore");
+        multi.snapshot = snapshots[0]["id"].as_str().unwrap().into();
+        multi.target = multi_target.to_str().unwrap().into();
+        multi.restore_paths = vec![
+            selected.to_str().unwrap().into(),
+            folder.to_str().unwrap().into(),
+        ];
+        success(multi);
+        assert_eq!(
+            std::fs::read_to_string(multi_target.join(selected.strip_prefix("/").unwrap()))
+                .unwrap(),
+            "exact file"
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                multi_target
+                    .join(folder.strip_prefix("/").unwrap())
+                    .join("nested.txt")
+            )
+            .unwrap(),
+            "nested data"
+        );
+        assert!(
+            !multi_target
+                .join(sibling.strip_prefix("/").unwrap())
+                .exists()
+        );
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires restic on PATH; uses only a disposable temporary repository"]
+    fn real_restic_restore_selected_paths_from_snapshot() {
+        let base = std::env::temp_dir().join(format!(
+            "restore-process-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = base.join("source");
+        let folder = source.join("photos");
+        let repository = base.join("repository");
+        std::fs::create_dir_all(&folder).unwrap();
+        let bytes = [0, 255, 10, 42, 128];
+        std::fs::write(source.join("selected[1].bin"), bytes).unwrap();
+        std::fs::write(folder.join("nested.txt"), "selected folder contents").unwrap();
+        std::fs::write(source.join("unchecked.txt"), "leave this out").unwrap();
+        success(request(&repository, "init"));
+        let mut backup = request(&repository, "backup");
+        backup.paths = vec![source.to_string_lossy().into_owned()];
+        success(backup);
+        let snapshots: serde_json::Value =
+            serde_json::from_str(&success(request(&repository, "snapshots")).stdout).unwrap();
+        // Delete originals so the test proves recovery from the snapshot itself.
+        std::fs::remove_dir_all(&source).unwrap();
+        let destination = base.join("recovered");
+        // Deserialize the same camelCase multi-selection payload sent by the tree UI.
+        let mut restore: Request = serde_json::from_value(serde_json::json!({
+            "repository": repository, "password": "test-only-password", "passwordFile": "",
+            "operation": "restore", "snapshot": snapshots[0]["id"], "target": destination,
+            "restorePaths": [source.join("selected[1].bin"), folder]
+        }))
+        .unwrap();
+        success(restore.clone());
+        let restored_source = destination.join(source.strip_prefix("/").unwrap());
+        assert_eq!(
+            std::fs::read(restored_source.join("selected[1].bin")).unwrap(),
+            bytes
+        );
+        assert_eq!(
+            std::fs::read_to_string(restored_source.join("photos/nested.txt")).unwrap(),
+            "selected folder contents"
+        );
+        assert!(!restored_source.join("unchecked.txt").exists());
+        // A second restore must refuse a nonempty target and preserve user edits.
+        std::fs::write(restored_source.join("selected[1].bin"), "user edit").unwrap();
+        assert!(
+            execute(restore.clone())
+                .err()
+                .expect("nonempty destination must be rejected")
+                .contains("new or empty directory")
+        );
+        assert_eq!(
+            std::fs::read_to_string(restored_source.join("selected[1].bin")).unwrap(),
+            "user edit"
+        );
+        // Checking the root restores everything, including the previously unchecked file.
+        let all = base.join("entire-snapshot");
+        restore.target = all.to_string_lossy().into_owned();
+        restore.restore_paths = vec!["/".into()];
+        success(restore);
+        assert_eq!(
+            std::fs::read_to_string(
+                all.join(source.strip_prefix("/").unwrap())
+                    .join("unchecked.txt")
+            )
+            .unwrap(),
+            "leave this out"
+        );
         std::fs::remove_dir_all(base).unwrap();
     }
 

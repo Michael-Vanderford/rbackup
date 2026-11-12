@@ -1,4 +1,6 @@
-# Backup Manager for Restic
+# rbackup
+
+Backup Manager for Restic
 
 A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses real repositories and the `restic` binary on your PATH.
 
@@ -6,7 +8,7 @@ A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses re
 
 *Backup workflow overview. Scheduled backups use Linux systemd user timers; manual operations also support Windows.*
 
-![Backup Manager for Restic in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
+![rbackup in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
 
 ## Run
 
@@ -61,7 +63,7 @@ Linux builds do not produce Windows installers by default. MSI requires Windows;
 
 1. Open **Repository**, enter the repository location, and supply a session password or an absolute password-file path. Connect an existing repository or initialize a new one.
 2. Open **Backup**, enter absolute source paths (one per line), optional excludes and tags. Preview with dry run, then uncheck dry run to create a snapshot.
-3. Refresh, open **Snapshots**, and choose **Browse / restore**. Restore all files or an include pattern into a new or empty absolute destination directory. Restored content is verified; existing files are never overwritten.
+3. Refresh, open **Snapshots**, and choose **Browse / restore**. Use the dedicated snapshot browser to restore an individual file, a folder, or the entire snapshot into a new or empty absolute destination directory. Restored content is verified; existing files are never overwritten.
 4. Open **Maintenance** to check metadata or read all stored data. Preview retention before typing `FORGET` to apply. Prune separately to reclaim unreferenced storage.
 
 Profile names, repository locations, source paths, exclusions, tags and password-file paths save automatically in the desktop webview's local storage. Password text stays in React/process memory unless you explicitly use **Create password file**; it is never written to profile storage or command-line arguments. Clearing it removes it from UI state; memory is not explicitly zeroized. Keep an independent copy of your password: losing it prevents recovery.
@@ -85,9 +87,13 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored --test-thread
 
 The ignored restic lifecycle test requires restic on PATH. It creates a disposable repository under the system temp directory, tests initialization, backup preview, exclusions, tags, snapshot/file listing, verified restore, refusal of nonempty restore targets, statistics, full data check, retention, pruning, password-file authentication and incorrect-password handling. It does not access your repositories.
 
+Run `npm run test:restore` for the checkbox-selection checks and a focused real-restic restore regression. It backs up disposable files, deletes the originals, restores selected files and folders through the UI request format, compares binary contents, checks that unchecked files stay excluded, verifies nonempty destinations preserve user edits, and tests restoring the entire snapshot. It never uses your configured repositories or jobs.
+
 ## Current limits
 
-Operations execute off the UI thread. Linux manual and scheduled operations share a cross-process lock; scheduled jobs wait while manual operations report when another app operation is busy. Output appears after completion; there is no live progress. Use **Cancel operation** to stop an app-owned restic operation. Keep the app open until the operation finishes or cancellation completes. Activity history is session-only and output is held in memory. Snapshot browsing loads one directory at a time and shows 200 entries per page; a single very large directory still loads in full. Open folders to navigate, use Parent folder to go back, and select a file or use the current folder as the restore filter. Paths are typed rather than selected with native dialogs. Scheduling is available on Linux through systemd user timers. No keychain, repair, manual unlock, mount, copy or key-management workflow yet.
+Operations execute off the UI thread. Linux manual and scheduled operations share a cross-process lock; scheduled jobs wait while manual operations report when another app operation is busy. Output appears after completion; there is no live progress. Use **Cancel operation** to stop an app-owned restic operation. Keep the app open until the operation finishes or cancellation completes. Activity history is session-only and output is held in memory. Snapshot browsing opens in a dedicated dialog with an expandable folder tree and checkboxes. Folder contents load lazily and remain cached while the browser is open; large folders reveal another 100 items at a time. Select individual files or entire folders, then use the single **Restore selected** action. A checked folder includes its descendants; unchecking a child preserves the other selected contents. The root checkbox selects the entire snapshot. Original paths are preserved within the destination. Browsing skips the stale-lock cleanup subprocess. Use arrow keys to navigate the tree, Right/Left to expand/collapse, and Space to toggle a selection. Paths are typed rather than selected with native dialogs. Scheduling is available on Linux through systemd user timers. No keychain, repair, manual unlock, copy or key-management workflow yet.
+
+On Linux, **Mount snapshot** uses restic’s read-only FUSE mount. Copy the displayed path to browse it manually in your file manager. Install FUSE and `fusermount3` (or `fusermount`) first. The repository is mounted in a private temporary directory (`/tmp/rbackup-mount-…/files` on Linux); other snapshots are available under `ids/`. One repository can be mounted at a time. The workspace banner’s **Browse mounted snapshot** opens the same checkbox tree directly from the FUSE mount. Its full path is displayed with a **Copy path** action. Snapshot symbolic links are displayed without following their targets. Use **Unmount** in the browser or workspace banner before repository maintenance; restic’s live repository lock protects mounted data from pruning. Mounts are stopped on normal app exit; a forced kill or crash may require a manual `fusermount3 -u <mountpoint>` (the mountpoint is the `files` directory above `ids/`). Mounting is currently unavailable on Windows and macOS; the built-in browser and restores remain available.
 
 See [implementation plan](docs/PLAN.md) and [review notes](docs/REVIEW.md) for decisions, validation results and next steps.
 
@@ -101,7 +107,7 @@ Run profile persistence and clean-start checks with `node tests/profiles.test.ts
 
 Choose **System**, **Light**, or **Dark** from the header's **Theme** selector. System is the default and follows OS appearance changes; explicit preferences persist on this device.
 
-The desktop app starts at 1100 × 760 and saves normal window size and position as you resize or move it. Sizes are stored in logical units so changing display scaling does not enlarge the restored window. It restores position before size and shows the window afterward; maximized, minimized, and fullscreen sizes are not restored. Geometry that fills the monitor work area (within decoration margins) is also excluded because native maximize-state notifications can lag resize events. Existing screen-filling caches fall back to the default size; manually resized windows that fill the work area follow the same rule. Geometry is stored in `window-geometry.json` under Tauri's app configuration directory (`~/.config/com.michael.tauri-backup-manager/` by default on Linux). The previous plugin's window cache is ignored once; repository settings are preserved. Monitor placement depends on the desktop compositor; Wayland may control placement itself.
+The desktop app starts at 1100 × 760 and saves normal window size and position as you resize or move it. Sizes are stored in logical units so changing display scaling does not enlarge the restored window. It creates the window with the saved size, restores position, and shows the window afterward; maximized, minimized, and fullscreen sizes are not restored. Geometry that fills the monitor work area (within decoration margins) is also excluded because native maximize-state notifications can lag resize events. Old unversioned caches are reset once because they may contain maximized dimensions. Existing screen-filling caches fall back to the default size; manually resized windows that fill the work area follow the same rule. Geometry is stored in `window-geometry.json` under Tauri's app configuration directory (`~/.config/com.michael.backup-manager/` by default on Linux). The previous plugin's window cache is ignored once; repository settings are preserved. Monitor placement depends on the desktop compositor; Wayland may control placement itself.
 
 ## Developer documentation
 
