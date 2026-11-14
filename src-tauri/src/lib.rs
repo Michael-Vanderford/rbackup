@@ -8,6 +8,7 @@ mod password_file;
 mod restic;
 #[cfg(target_os = "linux")]
 mod scheduler;
+#[cfg(desktop)]
 mod window_state;
 
 /// Dispatch a headless scheduled job before creating a Tauri application/webview.
@@ -161,9 +162,10 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = builder.manage(mount::MountState::default());
+    #[cfg(desktop)]
+    let builder = builder.setup(window_state::setup);
     builder
         .plugin(tauri_plugin_opener::init())
-        .setup(window_state::setup)
         .invoke_handler(tauri::generate_handler![
             snapshot_mount,
             snapshot_mount_entries,

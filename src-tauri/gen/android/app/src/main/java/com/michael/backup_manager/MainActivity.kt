@@ -1,4 +1,4 @@
-package com.michael.tauri_backup_manager
+package com.michael.backup_manager
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

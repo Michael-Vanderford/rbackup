@@ -55,6 +55,22 @@ function App() {
   const profile = profiles.find(p => p.id === active)!;
   const [password, setPassword] = useState("");
   const [tab, setTab] = useState(profile.repository ? "Overview" : "Repository");
+  const mobileMenu = useRef<HTMLDialogElement>(null);
+  const pageHeading = useRef<HTMLHeadingElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    const phone = window.matchMedia("(max-width: 720px)");
+    const closeOnDesktop = () => { if (!phone.matches) mobileMenu.current?.close(); };
+    phone.addEventListener("change", closeOnDesktop);
+    return () => phone.removeEventListener("change", closeOnDesktop);
+  }, []);
+  function navigate(name: string) {
+    setTab(name); setQuery(""); mobileMenu.current?.close();
+    requestAnimationFrame(() => {
+      pageHeading.current?.focus({ preventScroll: true });
+      document.getElementById("root")?.scrollTo({ top: 0 });
+    });
+  }
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [connected, setConnected] = useState(false);
   const [selected, setSelected] = useState("");
@@ -242,16 +258,25 @@ function App() {
       ? { id: mounted.snapshot, short_id: mounted.snapshot.slice(0, 8), hostname: "Read-only mount", time: "", paths: [] } : undefined);
   const filtered = snapshots.filter(s => `${s.id} ${s.hostname} ${s.paths.join(" ")} ${s.tags?.join(" ")}`.toLowerCase().includes(query.toLowerCase()));
   const policyKey = JSON.stringify([active, profile.repository, policy]);
-  return <div className="app-shell">
-    <aside className="sidebar">
+  const sidebarContents = <>
       <div className="brand"><img className="brand-mark" src="/rbackup.svg" alt="" width="40" height="40" /><div>rbackup<span>Backup Manager for Restic</span></div></div>
       <div className="nav-label">WORKSPACE</div>
-      <nav aria-label="Main navigation">{["Overview", "Repository", "Backup", "Snapshots", "Maintenance"].map((name, i) => <button key={name} className={tab === name ? "nav-item active" : "nav-item"} onClick={() => { setTab(name); setQuery(""); }} aria-current={tab === name ? "page" : undefined}><span aria-hidden="true">{["◫", "▣", "↑", "◷", "⚙"][i]}</span>{name}</button>)}</nav>
+      <nav aria-label="Main navigation">{["Overview", "Repository", "Backup", "Snapshots", "Maintenance"].map((name, i) => <button key={name} className={tab === name ? "nav-item active" : "nav-item"} onClick={() => navigate(name)} aria-current={tab === name ? "page" : undefined}><span aria-hidden="true">{["◫", "▣", "↑", "◷", "⚙"][i]}</span>{name}</button>)}</nav>
       <div className="sidebar-bottom"><span className="dot" /> Local desktop workspace<p>Encrypted backups.<br />Recovery you control.</p><button className="text-button" disabled={!!busy || listing || mountBusy} onClick={() => void run("version")}>Check restic version ↗</button></div>
-    </aside>
+  </>;
+  return <div className="app-shell">
+    <aside className="sidebar desktop-sidebar">{sidebarContents}</aside>
+    <dialog ref={mobileMenu} id="mobile-navigation" className="mobile-menu" aria-label="Main navigation"
+      onClose={() => setMenuOpen(false)} onClick={event => { if (event.target === event.currentTarget) mobileMenu.current?.close(); }}>
+      <aside className="sidebar mobile-sidebar">
+        <div className="mobile-menu-heading"><span>Navigation</span><button aria-label="Close navigation" onClick={() => mobileMenu.current?.close()}>✕</button></div>
+        {sidebarContents}
+      </aside>
+    </dialog>
     <main>
-      <header><div className="breadcrumb">Workspace <span>/</span> {tab}</div><div className="header-controls"><label className="theme-control">Theme<select value={theme} onChange={e => setTheme(e.target.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><div role="status" className={`connection status-${connected ? "success" : "warning"}`}><span className="dot" aria-hidden="true" />{connected ? "Repository connected" : "Not connected"}</div></div></header>
-      <div className="page-heading"><div><div className="eyebrow">YOUR DATA, PROTECTED</div><h1>{tab === "Overview" ? "Backup overview" : tab}</h1><p>{({ Overview: "A clear view of your backups, from source to recovery.", Repository: "Connect to an existing repository or create an encrypted one.", Backup: "Choose what matters. Keep a recoverable copy.", Snapshots: "Explore your history and bring your files back.", Maintenance: "Check integrity and manage your retention policy." } as Record<string, string>)[tab]}</p></div><button disabled={!!busy || listing || mountBusy} className="primary" onClick={() => void refresh()}>↻ Connect / refresh</button></div>
+      <header><div className="header-navigation"><button className="menu-toggle" aria-label="Open navigation" aria-haspopup="dialog" aria-controls="mobile-navigation" aria-expanded={menuOpen}
+        onClick={() => { mobileMenu.current?.showModal(); setMenuOpen(true); }}><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button><div className="breadcrumb">Workspace <span>/</span> {tab}</div></div><div className="header-controls"><label className="theme-control">Theme<select value={theme} onChange={e => setTheme(e.target.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><div role="status" className={`connection status-${connected ? "success" : "warning"}`}><span className="dot" aria-hidden="true" />{connected ? "Repository connected" : "Not connected"}</div></div></header>
+      <div className="page-heading"><div><div className="eyebrow">YOUR DATA, PROTECTED</div><h1 ref={pageHeading} tabIndex={-1}>{tab === "Overview" ? "Backup overview" : tab}</h1><p>{({ Overview: "A clear view of your backups, from source to recovery.", Repository: "Connect to an existing repository or create an encrypted one.", Backup: "Choose what matters. Keep a recoverable copy.", Snapshots: "Explore your history and bring your files back.", Maintenance: "Check integrity and manage your retention policy." } as Record<string, string>)[tab]}</p></div><button disabled={!!busy || listing || mountBusy} className="primary" onClick={() => void refresh()}>↻ Connect / refresh</button></div>
       {!desktop && <div className="banner">Interface preview · Run the Tauri desktop app to connect to restic.</div>}
       <div className="profile-bar"><label>Repository<select disabled={!!busy || listing || mountBusy} value={active} onChange={e => { reset(); setActive(e.target.value); }}>{profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><code>{profile.repository || "No location configured"}</code><button disabled={!!busy || listing || mountBusy} onClick={() => { const p = blank(); save([...profiles, p]); reset(); setActive(p.id); setTab("Repository"); }}>+ Add repository</button></div>
       <div role="status" aria-live="polite" className={`status${busy || notice ? " visible" : ""} status-${busy ? "progress" : noticeTone}`}>{busy ? <><span className="spinner" /> {cancelling ? `Cancelling ${busy}… Waiting for restic to stop.` : `Running ${busy}… Keep the app open until it finishes.`}</> : notice}</div>

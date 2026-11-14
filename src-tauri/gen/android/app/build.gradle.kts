@@ -16,10 +16,10 @@ val tauriProperties = Properties().apply {
 
 android {
     compileSdk = 37
-    namespace = "com.michael.tauri_backup_manager"
+    namespace = "com.michael.backup_manager"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.michael.tauri_backup_manager"
+        applicationId = "com.michael.backup_manager"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
@@ -39,9 +39,7 @@ android {
             }
         }
         getByName("release") {
-            optimization {
-               enable = true
-            }
+            isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") {
                   include("**/*.pro")
