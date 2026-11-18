@@ -4,7 +4,7 @@ Backup Manager for Restic
 
 A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses real repositories and the `restic` binary on your PATH.
 
-![Backup workflow: choose files, create encrypted snapshots, and restore; optional automatic integrity checks, retention, and pruning follow successful backups.](docs/images/backup-flow.svg)
+<!-- ![Backup workflow: choose files, create encrypted snapshots, and restore; optional automatic integrity checks, retention, and pruning follow successful backups.](docs/images/backup-flow.svg) -->
 
 *Backup workflow overview. Scheduled backups use Linux systemd user timers or Windows Task Scheduler.*
 
@@ -61,14 +61,14 @@ Linux builds do not produce Windows installers by default. MSI requires Windows;
 
 ## Workflow
 
-1. Open **Repository**, enter the repository location, and supply a session password or an absolute password-file path. Connect an existing repository or initialize a new one.
+1. Open **Repository**, enter the repository location, and supply a session password or an absolute password-file path. Select **Check and connect**. If restic reports that the location has no repository, **Initialize new repository** becomes available. This detection requires restic 0.17.0 or newer.
 2. Open **Backup**, enter absolute source paths (one per line), optional excludes and tags. Preview with dry run, then uncheck dry run to create a snapshot.
 3. Refresh, open **Snapshots**, and choose **Browse / restore**. Use the dedicated snapshot browser to restore an individual file, a folder, or the entire snapshot into a new or empty absolute destination directory. Restored content is verified; existing files are never overwritten.
 4. Open **Maintenance** to check metadata or read all stored data. Preview retention before typing `FORGET` to apply. Prune separately to reclaim unreferenced storage.
 
 Profile names, repository locations, source paths, exclusions, tags and password-file paths save automatically in the desktop webview's local storage. Password text stays in React/process memory unless you explicitly use **Create password file**; it is never written to profile storage or command-line arguments. Clearing it removes it from UI state; memory is not explicitly zeroized. Keep an independent copy of your password: losing it prevents recovery.
 
-The app remembers the last selected repository and reconnects on startup using its saved password file, loading its snapshots. Without a password file, it opens Repository settings so you can enter your session password and connect. Connection failures appear in the status message and can be retried with **Connect / refresh**.
+The app remembers the last selected repository and reconnects on startup and when you switch profiles using the selected profile’s saved password file, loading its snapshots. Without a password file, it opens Repository settings so you can enter your session password and connect. Connection failures appear in the status message and can be retried with **Connect / refresh**.
 
 Remote backend support uses restic repository URLs and credentials inherited from the environment launching the desktop app. No provider-specific credential manager is included. Avoid credentials in URLs because profile metadata is stored unencrypted.
 
@@ -102,6 +102,8 @@ Restic behavior follows the [official manual](https://restic.readthedocs.io/en/s
 ## First launch
 
 A fresh install starts with one blank repository profile. No personal jobs, paths, exclusions, credentials, or schedules are bundled. Configure your repository and credentials before connecting. Existing saved profiles remain available on upgrades; installing a new package does not clear existing webview storage.
+
+Click **+ New profile** beside **Backup profile** to add another job. The app selects the new profile and opens **Repository** for setup. Each profile has its own sources, exclusions, and optional schedule. Select the profile before editing **Backup → Backup schedule**.
 
 Run profile persistence and clean-start checks with `node tests/profiles.test.ts` (Node.js 22.18+ or 24+).
 

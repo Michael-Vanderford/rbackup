@@ -62,7 +62,7 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
     const tone = run?.state === "success" ? "success" : run?.state === "failed" ? "error" : run?.state === "running" || run?.state === "waiting" ? "progress" : "warning";
     return <section className="card form-card schedule-card" aria-labelledby="schedule-heading">
         <div className="card-heading"><h2 id="schedule-heading">Backup schedule</h2><span className={`badge schedule-status status-${!status ? "progress" : !status.available ? "warning" : status.schedule.enabled ? "success" : "warning"}`} role="status">{!status ? "LOADING" : !status.available ? "UNAVAILABLE" : status.schedule.enabled ? "ENABLED" : "DISABLED"}</span></div>
-        <p>Daily or weekly backups in your computer’s local time. The system scheduler can catch up on missed runs. Scheduled backups create snapshots, independently of the manual dry-run checkbox.</p>
+        <p>This schedule applies to <strong>{profile.name}</strong>. Daily and weekly backups use your computer’s local time. The system scheduler can catch up on missed runs. Scheduled backups create snapshots, independently of the manual dry-run checkbox.</p>
         {!desktop && <p className="banner">Open the Windows or Linux desktop app to configure schedules.</p>}
         {status && !status.available && <div className="banner">Scheduling requires Windows Task Scheduler or a working Linux systemd user session. Manual backups remain available.<p>{status.reason}</p></div>}
         <fieldset className="workspace" disabled={!loaded || !status?.available || busy || saving || cancelling}>

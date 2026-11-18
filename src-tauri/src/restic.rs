@@ -120,7 +120,11 @@ pub fn arguments(r: &Request) -> Result<Vec<String>, String> {
                 .into(),
         ]);
     }
-    a.push(r.operation.clone());
+    let command = match r.operation.as_str() {
+        "forget_snapshot" => "forget",
+        operation => operation,
+    };
+    a.push(command.into());
     match r.operation.as_str() {
         "init" | "snapshots" | "stats" | "unlock" => {}
         "backup" => {
@@ -220,6 +224,16 @@ pub fn arguments(r: &Request) -> Result<Vec<String>, String> {
                 a.push("--read-data".into());
             }
         }
+        "forget_snapshot" => {
+            snapshot(&r.snapshot)?;
+            if r.snapshot.len() != 64 || r.confirmation != "FORGET" {
+                return Err("Select and confirm the exact snapshot to delete.".into());
+            }
+            if r.dry_run {
+                a.push("--dry-run".into());
+            }
+            a.push(r.snapshot.clone());
+        }
         "forget" => {
             if [r.keep_last, r.keep_daily, r.keep_weekly, r.keep_monthly]
                 .iter()
@@ -312,7 +326,7 @@ pub(crate) fn execute_with(
         let mut cleanup = r.clone();
         cleanup.operation = "unlock".into();
         let unlocked = run(&cleanup, arguments(&cleanup)?)?;
-        if unlocked.code == 130 {
+        if unlocked.code == 130 || (r.operation == "snapshots" && unlocked.code == 10) {
             return Ok(unlocked);
         }
         if unlocked.code != 0 {
@@ -844,6 +858,19 @@ mod tests {
         assert!(arguments(&r).is_err());
     }
     #[test]
+    fn snapshot_deletion_requires_confirmation_and_a_full_id() {
+        let mut r = request(Path::new("/tmp/test"), "forget_snapshot");
+        r.snapshot = "01234567".repeat(8);
+        assert!(arguments(&r).is_err());
+        r.confirmation = "FORGET".into();
+        r.keep_last = 5;
+        let args = arguments(&r).unwrap();
+        assert_eq!(&args[3..], ["forget", &r.snapshot]);
+        r.snapshot.truncate(8);
+        assert!(arguments(&r).is_err());
+    }
+
+    #[test]
     fn sftp_authentication_is_noninteractive_for_every_operation() {
         for repository in ["sftp:user@host:/backup", "sftp://user@host:2222//backup"] {
             let mut r = request(Path::new("/unused"), "snapshots");
@@ -1069,6 +1096,17 @@ mod tests {
         .unwrap();
         assert_eq!(calls, 1);
         assert!(failure.contains("access denied"));
+        let missing = execute_with(&r, |request, _| {
+            assert_eq!(request.operation, "unlock");
+            Ok(Output {
+                stdout: String::new(),
+                stderr: "repository does not exist".into(),
+                code: 10,
+            })
+        })
+        .unwrap();
+        assert_eq!(missing.code, 10);
+
         r.operation = "prune".into();
         assert!(execute_with(&r, |_, _| panic!("invalid requests must not run cleanup")).is_err());
     }
@@ -1134,6 +1172,17 @@ mod tests {
         std::fs::write(source.join("important.txt"), "second revision\n").unwrap();
         let mut second = request(&repository, "backup");
         second.paths = vec![source.to_str().unwrap().into()];
+        success(second.clone());
+
+        let mut deletion = request(&repository, "forget_snapshot");
+        deletion.snapshot = id.into();
+        deletion.confirmation = "FORGET".into();
+        success(deletion);
+        let remaining = success(request(&repository, "snapshots"));
+        let remaining: Vec<serde_json::Value> = serde_json::from_str(&remaining.stdout).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_ne!(remaining[0]["id"].as_str().unwrap(), id);
+
         success(second);
         success(request(&repository, "stats"));
         let mut check = request(&repository, "check");
