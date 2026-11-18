@@ -197,3 +197,36 @@ button:not(.workflow):not(.tree-name) { white-space: nowrap; }
 .snapshot-actions button { display: grid; place-items: center; flex: 0 0 32px; height: 32px; padding: 0; }
 .snapshot-actions svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .output-card > summary { padding-top: 0; font-size: 16px; font-weight: 600; color: inherit; }
+
+:root .checkbox input[role="switch"] {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 36px;
+  height: 22px;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid #777;
+  border-radius: 999px;
+  background: #666;
+  cursor: pointer;
+}
+:root .checkbox input[role="switch"]:checked {
+  justify-content: flex-end;
+  background: #3269a8;
+  border-color: #3269a8;
+}
+.checkbox input[role="switch"]::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+}
+.checkbox input[role="switch"]:disabled { opacity: .45; cursor: not-allowed; }
+@media (forced-colors: active) {
+  :root .checkbox input[role="switch"] { forced-color-adjust: none; background: Canvas; border-color: CanvasText; }
+  :root .checkbox input[role="switch"]:checked { background: Highlight; border-color: Highlight; }
+  .checkbox input[role="switch"]::before { background: CanvasText; }
+  .checkbox input[role="switch"]:checked::before { background: HighlightText; }
+}

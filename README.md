@@ -61,7 +61,7 @@ Linux builds do not produce Windows installers by default. MSI requires Windows;
 
 ## Workflow
 
-1. Open **Repository**, enter the repository location, and supply a session password or an absolute password-file path. Select **Check and connect**. If restic reports that the location has no repository, **Initialize new repository** becomes available. This detection requires restic 0.17.0 or newer.
+1. Open **Repository**, enter the repository location, and supply a session password or an absolute password-file path. Select **Connect**. If restic reports that the location has no repository, **Initialize new repository** becomes available. This detection requires restic 0.17.0 or newer.
 2. Open **Backup**, enter absolute source paths (one per line), optional excludes and tags. Preview with dry run, then uncheck dry run to create a snapshot.
 3. Refresh, open **Snapshots**, and choose **Browse / restore**. Use the dedicated snapshot browser to restore an individual file, a folder, or the entire snapshot into a new or empty absolute destination directory. Restored content is verified; existing files are never overwritten.
 4. Open **Maintenance** to check metadata or read all stored data. Preview retention before typing `FORGET` to apply. Prune separately to reclaim unreferenced storage.
@@ -71,6 +71,8 @@ Profile names, repository locations, source paths, exclusions, tags and password
 The app remembers the last selected repository and reconnects on startup and when you switch profiles using the selected profile’s saved password file, loading its snapshots. Without a password file, it opens Repository settings so you can enter your session password and connect. Connection failures appear in the status message and can be retried with **Connect / refresh**.
 
 Remote backend support uses restic repository URLs and credentials inherited from the environment launching the desktop app. No provider-specific credential manager is included. Avoid credentials in URLs because profile metadata is stored unencrypted.
+
+For AWS S3 or compatible storage, open **Repository → Set up an S3 repository** and enter the service endpoint, bucket, and optional repository prefix. Select **Use S3 location**, then **Connect**. Configure provider credentials for the desktop process and the scheduled account, for example through `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, with `AWS_SESSION_TOKEN` for temporary credentials. Set `AWS_DEFAULT_REGION` in those environments when the provider requires a region override.
 
 SFTP connections use non-interactive SSH batch mode with strict host-key verification. Set up an SSH key or agent and verify the server's host key outside the app first; missing authentication or unknown/changed host keys fail in the app instead of asking for passwords or host approval. An encrypted SSH key must already be unlocked through an agent. The restic repository password and password file are separate from SSH authentication. These rules apply to stale-lock cleanup, manual backups, automatic maintenance and scheduled backups. On Windows, restic is launched without a console window; native Windows verification is still required for SSH subprocess behavior.
 
@@ -131,7 +133,7 @@ While restic is running, **Cancel operation** appears below the status banner. O
 ## Scheduled backups (Linux)
 
 1. Configure the repository, sources, exclusions, and tags. Set an existing readable **Password file**, or use **Create password file**. Session-only passwords cannot authenticate unattended backups.
-2. Open **Backup → Backup schedule**, select daily or weekly, choose a local time and weekdays, check **Enable scheduled backups**, and click **Save schedule**. Every profile defaults to daily 3:00 AM **disabled**. No legacy schedule is activated automatically.
+2. Open **Backup → Backup schedule**, select daily or weekly, choose a local time and weekdays, then turn on **Enable scheduled backups**. Schedule settings save automatically. Turning the switch off keeps your frequency, time, and weekdays for the next time you enable it. Every profile defaults to daily 3:00 AM **disabled**. No legacy schedule is activated automatically.
 3. The panel shows the next timer occurrence, active/waiting state, last result, and the last 100 journal lines (up to 64,000 characters). **Cancel scheduled backup** stops running or queued work. Closing the app does not cancel a scheduled service.
 
 Scheduled jobs always create snapshots; the manual backup dry-run checkbox does not affect them. Automatic maintenance runs after a successful backup when enabled for that profile. Backups run during your systemd user login session, even with the app closed. A persistent timer catches up once after missed runs when the user manager resumes; it does not replay each missed occurrence or wake a sleeping computer. Scheduling before login requires separately configuring systemd user lingering; the app does not change it. Local times and daylight-saving behavior follow systemd and the computer's timezone. Failed runs are recorded without automatic retries.
@@ -167,11 +169,11 @@ The normal headless tests use temporary homes and repositories, cover password-f
 
 ## Scheduled backups on Windows
 
-In **Repository**, create a password file or enter its absolute path. In **Backup → Backup schedule**, choose a daily or weekly local time, enable the schedule, and save it. Windows Task Scheduler runs the headless backup using your account while you're signed in, including when the app is closed or the workstation is locked. Windows can start missed runs when the task becomes available. The task runs without elevation, allows battery power, and uses the credentials and drives available to that Windows session. See [Windows Task Scheduler settings](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset).
+In **Repository**, create a password file or enter its absolute path. In **Backup → Backup schedule**, choose a daily or weekly local time and enable the schedule. Changes save automatically. Windows Task Scheduler runs the headless backup using your account while you're signed in, including when the app is closed or the workstation is locked. Windows can start missed runs when the task becomes available. The task runs without elevation, allows battery power, and uses the credentials and drives available to that Windows session. See [Windows Task Scheduler settings](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset).
 
 The app shows the next run, active state, last result, and recent output from the latest run. **Cancel scheduled backup** requests cancellation through the app so the headless runner can stop its restic child. Profile changes update future runs. Invalid settings disable the task, and removing a profile removes its task.
 
-Tasks appear in the Task Scheduler Library as `tauri-backup-manager-<user-SID>-<profile-id>`. Schedule settings, results, and logs are stored under `%LOCALAPPDATA%\tauri-backup-manager\schedules`. The schedule stores the password-file path and the absolute restic executable path. Save the schedule again after moving the app or restic.
+Tasks appear in the Task Scheduler Library as `tauri-backup-manager-<user-SID>-<profile-id>`. Schedule settings, results, and logs are stored under `%LOCALAPPDATA%\tauri-backup-manager\schedules`. The schedule stores the password-file path and the absolute restic executable path. Turn the schedule off and back on after moving the app or restic.
 
 To verify a Windows installation, use a disposable repository and save a schedule. Close the app, select the matching task in Task Scheduler, and click **Run**. Reopen the app to verify the result, output, and snapshot. For a longer run, verify cancellation in the app, then disable the schedule and remove the test profile.
 

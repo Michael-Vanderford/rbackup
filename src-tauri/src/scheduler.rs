@@ -952,6 +952,28 @@ mod tests {
                 "03:00"
             );
             assert!(home.join("enabled").exists());
+            let mut weekly = schedule.clone();
+            weekly.frequency = "weekly".into();
+            weekly.time = "07:45".into();
+            weekly.weekdays = vec![2, 4];
+            save(edited.clone(), weekly.clone()).unwrap();
+            weekly.enabled = false;
+            save(edited.clone(), weekly.clone()).unwrap();
+            let disabled = status(&profile.id).unwrap();
+            assert!(!disabled.schedule.enabled);
+            assert!(disabled.next_run.is_empty());
+            assert_eq!(disabled.schedule.time, "07:45");
+            assert_eq!(disabled.schedule.weekdays, vec![2, 4]);
+            assert!(!home.join("enabled").exists());
+            let mut reenabled = disabled.schedule;
+            reenabled.enabled = true;
+            save(edited.clone(), reenabled).unwrap();
+            let restored = status(&profile.id).unwrap().schedule;
+            assert!(restored.enabled);
+            assert_eq!(restored.frequency, "weekly");
+            assert_eq!(restored.time, "07:45");
+            assert_eq!(restored.weekdays, vec![2, 4]);
+            assert!(home.join("enabled").exists());
             // A service that fails before the runner launches must not display an old success as current.
             write_json(
                 &state_path(&profile.id).unwrap(),

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loadProfiles, type Profile } from "../src/profiles.ts";
+import { loadProfiles, rcloneRepository, s3Repository, type Profile } from "../src/profiles.ts";
 
 const data = new Map<string, string>();
 const storage = { getItem: (key: string) => data.get(key) ?? null };
@@ -16,4 +16,17 @@ for (const saved of ["null", "{}", "[{}]", "invalid JSON"]) {
   data.set("restic-profiles", saved);
   assert.throws(() => loadProfiles(storage), "invalid storage must be rejected");
 }
-console.log("Clean-start and saved-profile checks passed.");
+assert.equal(rcloneRepository(" Work Drive ", "bucket/Backup files"), "rclone:Work Drive:bucket/Backup files");
+assert.equal(rcloneRepository("cloud", ""), "rclone:cloud:");
+assert.equal(rcloneRepository("cloud", "/backups"), "rclone:cloud:/backups");
+for (const remote of ["", "cloud:other", "cloud,type=local", "--flag", ":local"]) {
+  assert.equal(rcloneRepository(remote, "backup"), "");
+}
+assert.equal(s3Repository("https://s3.us-east-1.amazonaws.com", "my-backups", ""), "s3:https://s3.us-east-1.amazonaws.com/my-backups");
+assert.equal(s3Repository("http://localhost:9000/", "my-backups", "/folder/Backup #1/"), "s3:http://localhost:9000/my-backups/folder/Backup%20%231");
+for (const endpoint of ["https://user:secret@example.test", "https://example.test/bucket", "https://example.test?key=secret", "https://bucket.s3.us-east-1.amazonaws.com", "ftp://example.test"]) {
+  assert.equal(s3Repository(endpoint, "my-backups", ""), "");
+}
+assert.equal(s3Repository("https://example.test", "bad/bucket", ""), "");
+assert.equal(s3Repository("https://example.test", "my-backups", "folder/../other"), "");
+console.log("Clean-start, saved-profile, and repository location checks passed.");
