@@ -266,7 +266,7 @@ pub fn execute(r: Request) -> Result<Output, String> {
     let cancelled = Arc::new(AtomicBool::new(false));
     *CANCELLATION.lock().map_err(|e| e.to_string())? = Some(cancelled.clone());
     let result = (|| {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         let _process_lock =
             crate::coordination::acquire(&crate::scheduler::operation_lock()?, false, &cancelled)?;
         execute_with(&r, |request, args| {

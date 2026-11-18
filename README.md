@@ -6,7 +6,7 @@ A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses re
 
 ![Backup workflow: choose files, create encrypted snapshots, and restore; optional automatic integrity checks, retention, and pruning follow successful backups.](docs/images/backup-flow.svg)
 
-*Backup workflow overview. Scheduled backups use Linux systemd user timers; manual operations also support Windows.*
+*Backup workflow overview. Scheduled backups use Linux systemd user timers or Windows Task Scheduler.*
 
 ![rbackup in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
 
@@ -55,7 +55,7 @@ npm run tauri -- build --bundles nsis,msi
 
 The setup executable is under `src-tauri/target/release/bundle/nsis/`, the MSI is under `src-tauri/target/release/bundle/msi/`, and the application executable is `src-tauri/target/release/rbackup.exe`. Building MSI packages also requires the Windows VBScript optional feature. For an executable without an installer, use `npm run tauri -- build --no-bundle`.
 
-Install restic separately and make `restic.exe` available on PATH on the destination computer. Windows supports manual repository operations; systemd scheduling and managed password-file creation are currently unavailable. You can use an existing password file or a session password.
+Install restic separately and make `restic.exe` available on PATH on the destination computer. Windows supports manual and scheduled backups. Use an existing password file for scheduling. Manual operations can also use a session password. Managed password-file creation is currently unavailable on Windows.
 
 Linux builds do not produce Windows installers by default. MSI requires Windows; cross-compiling an NSIS installer requires additional tooling described in the [Tauri Windows installer guide](https://v2.tauri.app/distribute/windows-installer/).
 
@@ -91,7 +91,7 @@ Run `npm run test:restore` for the checkbox-selection checks and a focused real-
 
 ## Current limits
 
-Operations execute off the UI thread. Linux manual and scheduled operations share a cross-process lock; scheduled jobs wait while manual operations report when another app operation is busy. Output appears after completion; there is no live progress. Use **Cancel operation** to stop an app-owned restic operation. Keep the app open until the operation finishes or cancellation completes. Activity history is session-only and output is held in memory. Snapshot browsing opens in a dedicated dialog with an expandable folder tree and checkboxes. Folder contents load lazily and remain cached while the browser is open; large folders reveal another 100 items at a time. Select individual files or entire folders, then use the single **Restore selected** action. A checked folder includes its descendants; unchecking a child preserves the other selected contents. The root checkbox selects the entire snapshot. Original paths are preserved within the destination. Browsing skips the stale-lock cleanup subprocess. Use arrow keys to navigate the tree, Right/Left to expand/collapse, and Space to toggle a selection. Paths are typed rather than selected with native dialogs. Scheduling is available on Linux through systemd user timers. No keychain, repair, manual unlock, copy or key-management workflow yet.
+Operations execute off the UI thread. On Linux and Windows, manual and scheduled operations share a cross-process lock; scheduled jobs wait while manual operations report when another app operation is busy. Output appears after completion; there is no live progress. Use **Cancel operation** to stop an app-owned restic operation. Keep the app open until the operation finishes or cancellation completes. Activity history is session-only and output is held in memory. Snapshot browsing opens in a dedicated dialog with an expandable folder tree and checkboxes. Folder contents load lazily and remain cached while the browser is open; large folders reveal another 100 items at a time. Select individual files or entire folders, then use the single **Restore selected** action. A checked folder includes its descendants; unchecking a child preserves the other selected contents. The root checkbox selects the entire snapshot. Original paths are preserved within the destination. Browsing skips the stale-lock cleanup subprocess. Use arrow keys to navigate the tree, Right/Left to expand/collapse, and Space to toggle a selection. Paths are typed rather than selected with native dialogs. Scheduling is available through systemd user timers on Linux and Task Scheduler on Windows. No keychain, repair, manual unlock, copy or key-management workflow yet.
 
 On Linux, **Mount snapshot** uses restic’s read-only FUSE mount. Copy the displayed path to browse it manually in your file manager. Install FUSE and `fusermount3` (or `fusermount`) first. The repository is mounted in a private temporary directory (`/tmp/rbackup-mount-…/files` on Linux); other snapshots are available under `ids/`. One repository can be mounted at a time. The workspace banner’s **Browse mounted snapshot** opens the same checkbox tree directly from the FUSE mount. Its full path is displayed with a **Copy path** action. Snapshot symbolic links are displayed without following their targets. Use **Unmount** in the browser or workspace banner before repository maintenance; restic’s live repository lock protects mounted data from pruning. Mounts are stopped on normal app exit; a forced kill or crash may require a manual `fusermount3 -u <mountpoint>` (the mountpoint is the `files` directory above `ids/`). Mounting is currently unavailable on Windows and macOS; the built-in browser and restores remain available.
 
@@ -150,7 +150,7 @@ systemctl --user status tauri-backup-manager-<profile-id>.service
 journalctl --user -u tauri-backup-manager-<profile-id>.service -n 100
 ```
 
-On other platforms, or without an accessible systemd user session, scheduling is unavailable and manual backups remain available.
+Linux scheduling requires an accessible systemd user session.
 
 ### Scheduler checks
 
@@ -163,10 +163,20 @@ cargo test --manifest-path src-tauri/Cargo.toml --test scheduler_headless system
 
 The normal headless tests use temporary homes and repositories, cover password-file backups, queued/running cancellation, serialization, validation, and argument forwarding, and do not install timers. The unit verifier creates temporary unit files without activating them. The final, opt-in test needs a real systemd user session and installs uniquely named **runtime** units for generated temporary backup data, verifies app-closed execution and one missed-run catch-up, and removes its units and timer state afterward. It never enables a saved user schedule.
 
+## Scheduled backups on Windows
+
+Enter an existing absolute password-file path in **Repository**. In **Backup → Backup schedule**, choose a daily or weekly local time, enable the schedule, and save it. Windows Task Scheduler runs the headless backup using your account while you're signed in, including when the app is closed or the workstation is locked. Windows can start missed runs when the task becomes available. The task runs without elevation, allows battery power, and uses the credentials and drives available to that Windows session. See [Windows Task Scheduler settings](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset).
+
+The app shows the next run, active state, last result, and recent output from the latest run. **Cancel scheduled backup** requests cancellation through the app so the headless runner can stop its restic child. Profile changes update future runs. Invalid settings disable the task, and removing a profile removes its task.
+
+Tasks appear in the Task Scheduler Library as `tauri-backup-manager-<user-SID>-<profile-id>`. Schedule settings, results, and logs are stored under `%LOCALAPPDATA%\tauri-backup-manager\schedules`. The schedule stores the password-file path and the absolute restic executable path. Save the schedule again after moving the app or restic.
+
+To verify a Windows installation, use a disposable repository and save a schedule. Close the app, select the matching task in Task Scheduler, and click **Run**. Reopen the app to verify the result, output, and snapshot. For a longer run, verify cancellation in the app, then disable the schedule and remove the test profile.
+
 ## Automatic maintenance
 
 In **Maintenance → Automatic maintenance**, enable **After each successful backup** for the selected repository. Choose the retention counts (initially 3 last, 7 daily, 4 weekly, and 6 monthly) and optionally enable reading all backup data during the integrity check. Settings save automatically and synchronize to existing scheduled jobs; existing profiles start with automatic maintenance off.
 
 After a successful manual or scheduled backup, the app runs `restic check`, then `restic forget` with the saved automatic retention policy, then `restic prune`. This policy is separate from the manual retention preview controls. Automatic retention deletes snapshots outside the policy and pruning reclaims their unreferenced data. At least one retention count must be positive; invalid policies stop the operation before backup begins. Check uses metadata validation unless reading all data is enabled.
 
-Dry runs, failed backups, incomplete backups (exit 3), and cancelled backups skip maintenance. A failed or cancelled maintenance step stops all later steps. Backup and maintenance share the operation lock and cancellation handling. Results and output include maintenance; a maintenance failure does not undo the completed backup. Scheduled maintenance runs in the same systemd service with the app closed, using its saved password file. Manual maintenance automation also works on Windows; scheduled backups remain Linux-only.
+Dry runs, failed backups, incomplete backups (exit 3), and cancelled backups skip maintenance. A failed or cancelled maintenance step stops all later steps. Backup and maintenance share the operation lock and cancellation handling. Results and output include maintenance; a maintenance failure does not undo the completed backup. Scheduled maintenance runs in the same headless job as the backup, using its saved password file on Linux and Windows.

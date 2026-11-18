@@ -3,7 +3,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import type { Profile } from "./profiles";
 import { defaultSchedule, schedulerAction, type ScheduleStatus } from "./scheduler";
 
-/** Edit one repository's schedule and poll systemd without overwriting unsaved edits. */
+/** Edit one repository's schedule and poll the native scheduler without overwriting unsaved edits. */
 export default function SchedulePanel({ profile, busy, beforeSave }: { profile: Profile; busy: boolean; beforeSave: () => Promise<void> }) {
     const [schedule, setSchedule] = useState(defaultSchedule);
     const [status, setStatus] = useState<ScheduleStatus | null>(null);
@@ -62,9 +62,9 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
     const tone = run?.state === "success" ? "success" : run?.state === "failed" ? "error" : run?.state === "running" || run?.state === "waiting" ? "progress" : "warning";
     return <section className="card form-card schedule-card" aria-labelledby="schedule-heading">
         <div className="card-heading"><h2 id="schedule-heading">Backup schedule</h2><span className={`badge schedule-status status-${!status ? "progress" : !status.available ? "warning" : status.schedule.enabled ? "success" : "warning"}`} role="status">{!status ? "LOADING" : !status.available ? "UNAVAILABLE" : status.schedule.enabled ? "ENABLED" : "DISABLED"}</span></div>
-        <p>Daily or weekly backups in your computer’s local time. Missed runs catch up once when the user scheduler resumes. Scheduled backups create snapshots, independently of the manual dry-run checkbox.</p>
-        {!desktop && <p className="banner">Open the Linux desktop app to configure systemd user timers.</p>}
-        {status && !status.available && <div className="banner">Scheduling requires Linux and a working systemd user session. Manual backups remain available.<p>{status.reason}</p></div>}
+        <p>Daily or weekly backups in your computer’s local time. The system scheduler can catch up on missed runs. Scheduled backups create snapshots, independently of the manual dry-run checkbox.</p>
+        {!desktop && <p className="banner">Open the Windows or Linux desktop app to configure schedules.</p>}
+        {status && !status.available && <div className="banner">Scheduling requires Windows Task Scheduler or a working Linux systemd user session. Manual backups remain available.<p>{status.reason}</p></div>}
         <fieldset className="workspace" disabled={!loaded || !status?.available || busy || saving || cancelling}>
             <label className="checkbox"><input type="checkbox" checked={schedule.enabled} onChange={e => setSchedule({ ...schedule, enabled: e.target.checked })} />Enable scheduled backups</label>
             <div className="form-grid"><label>Frequency<select disabled={!schedule.enabled} value={schedule.frequency} onChange={e => setSchedule({ ...schedule, frequency: e.target.value as "daily" | "weekly" })}><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label><label>Local time<input type="time" disabled={!schedule.enabled} required value={schedule.time} onChange={e => setSchedule({ ...schedule, time: e.target.value })} /></label></div>

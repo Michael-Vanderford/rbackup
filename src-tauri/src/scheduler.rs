@@ -1,14 +1,22 @@
-//! Linux user timers and a headless backup runner. Configuration never contains passwords.
+//! Native desktop scheduling and a shared headless backup runner. Configuration never contains passwords.
 use crate::{coordination, restic};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    process::Command,
     sync::atomic::{AtomicBool, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(target_os = "linux")]
+use std::process::Command;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{cancel, status};
+#[cfg(windows)]
+use windows::{remove_locked, save_locked, stop};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,6 +101,7 @@ fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+#[cfg(target_os = "linux")]
 fn home() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -100,11 +109,19 @@ fn home() -> Result<PathBuf, String> {
         .ok_or("Cannot locate the user's home directory.".into())
 }
 fn root() -> Result<PathBuf, String> {
-    Ok(home()?.join(".local/share/tauri-backup-manager"))
+    #[cfg(target_os = "linux")]
+    return Ok(home()?.join(".local/share/tauri-backup-manager"));
+    #[cfg(windows)]
+    return std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .map(|path| path.join("tauri-backup-manager"))
+        .ok_or("Cannot locate the user's local app data directory.".into());
 }
 fn directory() -> Result<PathBuf, String> {
     Ok(root()?.join("schedules"))
 }
+#[cfg(target_os = "linux")]
 fn unit_directory() -> Result<PathBuf, String> {
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -112,6 +129,7 @@ fn unit_directory() -> Result<PathBuf, String> {
         .unwrap_or(home()?.join(".config"));
     Ok(config.join("systemd/user"))
 }
+#[cfg(target_os = "linux")]
 fn stem(id: &str) -> String {
     format!("tauri-backup-manager-{id}")
 }
@@ -124,26 +142,42 @@ fn state_path(id: &str) -> Result<PathBuf, String> {
     Ok(directory()?.join(format!("{id}.status.json")))
 }
 
+fn read_state(id: &str) -> Result<Option<RunState>, String> {
+    match fs::read(state_path(id)?) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Create private app-owned directories, refusing symlinks for the leaf directory.
 fn private_directory(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(path)
-        .map_err(|e| e.to_string())?;
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path).map_err(|e| e.to_string())?;
     if !fs::symlink_metadata(path)
         .map_err(|e| e.to_string())?
         .is_dir()
     {
         return Err("App data directory must not be a symlink.".into());
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Atomically replace private metadata; interrupted writes leave the previous file intact.
 fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
-    use std::os::unix::fs::OpenOptionsExt;
     let temporary = path.with_extension(format!(
         "tmp-{}-{}",
         std::process::id(),
@@ -153,15 +187,18 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
             .as_nanos()
     ));
     let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)
-            .map_err(|e| e.to_string())?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
         file.write_all(contents)
             .and_then(|_| file.sync_all())
             .map_err(|e| e.to_string())?;
+        drop(file);
         fs::rename(&temporary, path).map_err(|e| e.to_string())
     })();
     if result.is_err() {
@@ -185,7 +222,7 @@ fn read_job(id: &str) -> Result<Option<Job>, String> {
     }
 }
 
-/// All app restic processes coordinate through this stable lock inode.
+/// All app restic processes coordinate through this stable lock file.
 pub fn operation_lock() -> Result<PathBuf, String> {
     let root = root()?;
     private_directory(&root)?;
@@ -200,6 +237,7 @@ fn management_lock() -> Result<fs::File, String> {
     )
 }
 
+#[cfg(target_os = "linux")]
 fn tool(program: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new(program)
         .args(args)
@@ -214,17 +252,28 @@ fn tool(program: &str, args: &[&str]) -> Result<String, String> {
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().into())
 }
+#[cfg(target_os = "linux")]
 fn systemctl(args: &[&str]) -> Result<String, String> {
     let mut arguments = vec!["--user"];
     arguments.extend_from_slice(args);
     tool("systemctl", &arguments)
 }
+#[cfg(target_os = "linux")]
 fn available() -> Result<(), String> {
     systemctl(&["show-environment"]).map(|_| ())
 }
 
-/// Translate constrained daily/weekly fields into systemd's native local calendar syntax.
-fn calendar(schedule: &Schedule) -> Result<String, String> {
+const WEEKDAYS: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
+
+fn schedule_days(schedule: &Schedule) -> Result<Vec<&'static str>, String> {
     let bytes = schedule.time.as_bytes();
     if bytes.len() != 5
         || bytes[2] != b':'
@@ -240,26 +289,33 @@ fn calendar(schedule: &Schedule) -> Result<String, String> {
         return Err("Choose a valid local time.".into());
     }
     match schedule.frequency.as_str() {
-        "daily" => Ok(format!("*-*-* {}:00", schedule.time)),
-        "weekly" => {
-            if schedule.weekdays.is_empty() || schedule.weekdays.iter().any(|d| *d > 6) {
-                return Err("Choose at least one valid weekday.".into());
-            }
-            let mut days = schedule.weekdays.clone();
-            days.sort_unstable();
-            days.dedup();
-            let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-            Ok(format!(
-                "{} *-*-* {}:00",
-                days.iter()
-                    .map(|d| names[*d as usize])
-                    .collect::<Vec<_>>()
-                    .join(","),
-                schedule.time
-            ))
+        "daily" => Ok(Vec::new()),
+        "weekly" if schedule.weekdays.is_empty() || schedule.weekdays.iter().any(|d| *d > 6) => {
+            Err("Choose at least one valid weekday.".into())
         }
+        "weekly" => Ok(WEEKDAYS
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| schedule.weekdays.contains(&(*index as u8)))
+            .map(|(_, name)| *name)
+            .collect()),
         _ => Err("Schedule frequency must be daily or weekly.".into()),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn calendar(schedule: &Schedule) -> Result<String, String> {
+    let days = schedule_days(schedule)?;
+    let time = &schedule.time;
+    if days.is_empty() {
+        return Ok(format!("*-*-* {time}:00"));
+    }
+    let days = days
+        .iter()
+        .map(|day| &day[..3])
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(format!("{days} *-*-* {time}:00"))
 }
 fn split(value: &str) -> Vec<String> {
     value
@@ -289,29 +345,46 @@ fn validate_backup(profile: &Profile) -> Result<(), String> {
     Ok(())
 }
 fn executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
     path.is_absolute()
-        && fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        && fs::metadata(path).is_ok_and(|metadata| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            }
+            #[cfg(windows)]
+            metadata.is_file()
+        })
 }
 fn resolve_restic() -> Result<PathBuf, String> {
     std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|p| p.join("restic"))
+        .map(|p| {
+            p.join(if cfg!(windows) {
+                "restic.exe"
+            } else {
+                "restic"
+            })
+        })
         .find(|p| executable(p))
         .and_then(|p| fs::canonicalize(p).ok())
         .ok_or("Cannot find an executable restic on PATH.".into())
 }
 fn app_executable() -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
     let path = std::env::var_os("APPIMAGE")
         .map(PathBuf::from)
         .map(Ok)
         .unwrap_or_else(std::env::current_exe)
         .map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let path = std::env::current_exe().map_err(|e| e.to_string())?;
     if !executable(&path) {
         return Err("The app executable must be an existing absolute executable path.".into());
     }
     Ok(path)
 }
 /// Quote systemd ExecStart words (including literal percent and dollar characters), not shell words.
+#[cfg(target_os = "linux")]
 fn quote(value: &str) -> Result<String, String> {
     if value.chars().any(char::is_control) {
         return Err("Executable paths cannot contain control characters.".into());
@@ -325,6 +398,7 @@ fn quote(value: &str) -> Result<String, String> {
             .replace('$', "$$")
     ))
 }
+#[cfg(target_os = "linux")]
 fn units(id: &str, schedule: &Schedule, executable: &Path) -> Result<(String, String), String> {
     validate_id(id)?;
     let executable = executable
@@ -388,6 +462,7 @@ pub fn save(profile: Profile, schedule: Schedule) -> Result<(), String> {
     let _lock = management_lock()?;
     save_locked(profile, schedule)
 }
+#[cfg(target_os = "linux")]
 fn save_locked(profile: Profile, schedule: Schedule) -> Result<(), String> {
     validate_id(&profile.id)?;
     if schedule.enabled {
@@ -458,6 +533,7 @@ fn save_locked(profile: Profile, schedule: Schedule) -> Result<(), String> {
     }
     Ok(())
 }
+#[cfg(target_os = "linux")]
 fn stop(id: &str) -> Result<(), String> {
     let timer = format!("{}.timer", stem(id));
     let service = format!("{}.service", stem(id));
@@ -489,6 +565,11 @@ pub fn sync(profile: Profile) -> Result<(), String> {
 pub fn remove(id: &str) -> Result<(), String> {
     validate_id(id)?;
     let _lock = management_lock()?;
+    remove_locked(id)
+}
+
+#[cfg(target_os = "linux")]
+fn remove_locked(id: &str) -> Result<(), String> {
     let dir = unit_directory()?;
     let service = dir.join(format!("{}.service", stem(id)));
     let timer = dir.join(format!("{}.timer", stem(id)));
@@ -513,22 +594,20 @@ pub fn remove(id: &str) -> Result<(), String> {
 }
 
 /// Stop the scheduled service, including jobs waiting for the cross-process lock.
+#[cfg(target_os = "linux")]
 pub fn cancel(id: &str) -> Result<(), String> {
     validate_id(id)?;
     systemctl(&["stop", &format!("{}.service", stem(id))]).map(|_| ())
 }
 
 /// Read systemd's actual timer/service state and bounded recent journal output.
+#[cfg(target_os = "linux")]
 pub fn status(id: &str) -> Result<Status, String> {
     validate_id(id)?;
     let job = read_job(id)?;
     let availability = available();
     let service = format!("{}.service", stem(id));
-    let mut last_run = match fs::read(state_path(id)?) {
-        Ok(bytes) => Some(serde_json::from_slice::<RunState>(&bytes).map_err(|e| e.to_string())?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.to_string()),
-    };
+    let mut last_run = read_state(id)?;
     let state = if availability.is_ok() {
         systemctl(&["show", &service, "--property=ActiveState", "--value"]).unwrap_or_default()
     } else {
@@ -607,10 +686,12 @@ pub fn status(id: &str) -> Result<Status, String> {
     })
 }
 
+#[cfg(target_os = "linux")]
 extern "C" fn signal_cancel(_: libc::c_int) {
     restic::SIGNAL_CANCELLED.store(true, Ordering::SeqCst);
 }
 /// Register async-signal-safe cancellation before loading or waiting on scheduled work.
+#[cfg(target_os = "linux")]
 fn install_signals() -> Result<(), String> {
     // SAFETY: handler only updates a lock-free atomic; sigaction structs are fully initialized.
     unsafe {
@@ -638,7 +719,10 @@ pub fn run(id: &str) -> i32 {
 }
 fn run_job(id: &str) -> Result<i32, String> {
     validate_id(id)?;
+    #[cfg(target_os = "linux")]
     install_signals()?;
+    #[cfg(windows)]
+    let _watch = windows::watch_cancel(id)?;
     let job = read_job(id)?.ok_or("Scheduled backup configuration was not found.")?;
     if job.profile.id != id || !job.schedule.enabled {
         return Err("Schedule is disabled or its profile ID does not match.".into());
@@ -691,8 +775,13 @@ fn run_job(id: &str) -> Result<i32, String> {
                 &current.restic_path,
             )
         })?;
-        print!("{}", result.stdout);
-        eprint!("{}", result.stderr);
+        #[cfg(target_os = "linux")]
+        {
+            print!("{}", result.stdout);
+            eprint!("{}", result.stderr);
+        }
+        #[cfg(windows)]
+        windows::write_output(id, &result)?;
         Ok::<i32, String>(result.code)
     })();
     state.finished = Some(now());
@@ -713,7 +802,7 @@ fn run_job(id: &str) -> Result<i32, String> {
         Err(e) if code != 130 => e,
         _ if matches!(current_operation.as_str(), "check" | "forget" | "prune") && code != 0 => {
             format!(
-                "Backup completed; automatic {} {}. Later maintenance steps skipped. Review the journal output.",
+                "Backup completed; automatic {} {}. Later maintenance steps skipped. Review the scheduled-run output.",
                 current_operation,
                 if code == 130 { "cancelled" } else { "failed" }
             )
@@ -722,7 +811,7 @@ fn run_job(id: &str) -> Result<i32, String> {
             0 => "Backup and any configured automatic maintenance completed.",
             3 => "Backup incomplete: some files could not be read.",
             130 => "Backup cancelled; completed changes are not undone.",
-            _ => "Backup failed. Review the journal output.",
+            _ => "Backup failed. Review the scheduled-run output.",
         }
         .into(),
     };
@@ -734,7 +823,7 @@ fn run_job(id: &str) -> Result<i32, String> {
     Ok(code)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     #[test]
@@ -743,6 +832,7 @@ mod tests {
         assert_eq!(calendar(&schedule).unwrap(), "*-*-* 03:00:00");
         schedule.frequency = "weekly".into();
         schedule.weekdays = vec![6, 0, 0];
+        assert_eq!(schedule_days(&schedule).unwrap(), ["Monday", "Sunday"]);
         assert_eq!(calendar(&schedule).unwrap(), "Mon,Sun *-*-* 03:00:00");
         schedule.weekdays.clear();
         assert!(calendar(&schedule).is_err());

@@ -1,12 +1,12 @@
 use tauri::Manager;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod coordination;
 #[cfg(target_os = "linux")]
 mod mount;
 mod password_file;
 mod restic;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod scheduler;
 #[cfg(desktop)]
 mod window_state;
@@ -21,18 +21,20 @@ pub fn headless(args: &[String]) -> Option<i32> {
         eprintln!("Usage: --scheduled-backup <profile-id>");
         return Some(2);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         Some(scheduler::run(&args[1]))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
-        eprintln!("Scheduled backups require Linux and systemd user services.");
+        eprintln!(
+            "Scheduled backups require Linux systemd user services or Windows Task Scheduler."
+        );
         Some(2)
     }
 }
 
-/// Manage Linux schedules off the IPC thread. Password text is never accepted here.
+/// Manage desktop schedules off the IPC thread. Password text is never accepted here.
 #[tauri::command]
 async fn scheduler_action(
     action: String,
@@ -40,7 +42,7 @@ async fn scheduler_action(
     profile: Option<serde_json::Value>,
     schedule: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         tauri::async_runtime::spawn_blocking(move || {
             match action.as_str() {
@@ -73,13 +75,13 @@ async fn scheduler_action(
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         let _ = (profile_id, profile, schedule);
         if action == "sync" || action == "remove" {
             return Ok(serde_json::Value::Null);
         }
-        Err("Scheduled backups require Linux and systemd user services. Manual backups remain available.".into())
+        Err("Scheduled backups require Linux systemd user services or Windows Task Scheduler. Manual backups remain available.".into())
     }
 }
 
