@@ -150,9 +150,12 @@ async fn create_password_file(
     profile_id: String,
     password: String,
 ) -> Result<String, String> {
-    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let base = app.path().local_data_dir().map_err(|e| e.to_string())?;
+    #[cfg(not(windows))]
+    let base = app.path().home_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        password_file::create_managed(&home, &profile_id, &password)
+        password_file::create_managed(&base, &profile_id, &password)
     })
     .await
     .map_err(|e| e.to_string())?

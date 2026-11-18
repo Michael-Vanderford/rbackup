@@ -55,7 +55,7 @@ npm run tauri -- build --bundles nsis,msi
 
 The setup executable is under `src-tauri/target/release/bundle/nsis/`, the MSI is under `src-tauri/target/release/bundle/msi/`, and the application executable is `src-tauri/target/release/rbackup.exe`. Building MSI packages also requires the Windows VBScript optional feature. For an executable without an installer, use `npm run tauri -- build --no-bundle`.
 
-Install restic separately and make `restic.exe` available on PATH on the destination computer. Windows supports manual and scheduled backups. Use an existing password file for scheduling. Manual operations can also use a session password. Managed password-file creation is currently unavailable on Windows.
+Install restic separately and make `restic.exe` available on PATH on the destination computer. Windows supports manual and scheduled backups. Create or select a password file for scheduling. Manual operations can also use a session password.
 
 Linux builds do not produce Windows installers by default. MSI requires Windows; cross-compiling an NSIS installer requires additional tooling described in the [Tauri Windows installer guide](https://v2.tauri.app/distribute/windows-installer/).
 
@@ -119,7 +119,7 @@ Before each operation on an existing repository, the app runs `restic unlock` wi
 
 ## Create a password file
 
-In **Repository**, enter the **Session password**, then click **Create password file**. The app creates `~/.local/share/tauri-backup-manager/passwords/<profile-id>.password` and saves its absolute path in the profile. The managed directory is created automatically with owner-only permissions (0700). You can still enter an existing password file manually. On Linux and macOS, the new file is created with owner-only permissions (0600); existing files and symlinks are refused. Empty passwords and passwords containing line breaks are rejected. The password is saved exactly as entered, including spaces. The profile is updated to reference this path, so subsequent repository commands use it. The file contains the plaintext repository password: choose a private directory. Windows creation is currently unavailable because a private ACL implementation is not yet provided.
+In **Repository**, enter the **Session password**, then click **Create password file**. The app saves the path to a new file in the profile. On Windows, it creates `%LOCALAPPDATA%\tauri-backup-manager\passwords\<profile-id>.password` with an access control list restricted to the current Windows user. On Linux and macOS, it creates `~/.local/share/tauri-backup-manager/passwords/<profile-id>.password` with owner-only permissions (0600) in an owner-only directory (0700). You can also enter an existing password file manually. Empty passwords and passwords containing line breaks are rejected. The password is saved exactly as entered, including spaces. The profile is updated to reference this path, so subsequent repository commands use it. The file contains the plaintext repository password and is protected by filesystem permissions.
 
 
 ## Cancel long operations
@@ -165,7 +165,7 @@ The normal headless tests use temporary homes and repositories, cover password-f
 
 ## Scheduled backups on Windows
 
-Enter an existing absolute password-file path in **Repository**. In **Backup → Backup schedule**, choose a daily or weekly local time, enable the schedule, and save it. Windows Task Scheduler runs the headless backup using your account while you're signed in, including when the app is closed or the workstation is locked. Windows can start missed runs when the task becomes available. The task runs without elevation, allows battery power, and uses the credentials and drives available to that Windows session. See [Windows Task Scheduler settings](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset).
+In **Repository**, create a password file or enter its absolute path. In **Backup → Backup schedule**, choose a daily or weekly local time, enable the schedule, and save it. Windows Task Scheduler runs the headless backup using your account while you're signed in, including when the app is closed or the workstation is locked. Windows can start missed runs when the task becomes available. The task runs without elevation, allows battery power, and uses the credentials and drives available to that Windows session. See [Windows Task Scheduler settings](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset).
 
 The app shows the next run, active state, last result, and recent output from the latest run. **Cancel scheduled backup** requests cancellation through the app so the headless runner can stop its restic child. Profile changes update future runs. Invalid settings disable the task, and removing a profile removes its task.
 
