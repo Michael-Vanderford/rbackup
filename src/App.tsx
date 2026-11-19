@@ -9,7 +9,7 @@ import S3Setup from "./S3Setup";
 import { schedulerAction } from "./scheduler";
 
 type MountedSnapshot = { snapshot: string; path: string; repository: string };
-type Result = { stdout: string; stderr: string; code: number };
+type Result = { stdout: string; stderr: string; code: number; interruptedMaintenance?: string };
 /** Create a new repository profile with a random UUID and empty connection and backup settings. */
 const blank = (): Profile => ({ id: crypto.randomUUID(), name: "My repository", repository: "", passwordFile: "", sources: "", excludes: "", tags: "" });
 /** Load saved profiles. Return a blank profile if none exist or storage, JSON parsing, or validation fails. */
@@ -89,7 +89,7 @@ function App() {
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "warning" | "error">("error");
   const [output, setOutput] = useState("");
-  const [activity, setActivity] = useState<{ operation: string; time: string; code: number }[]>([]);
+  const [activity, setActivity] = useState<{ operation: string; time: string; result: string; tone: "success" | "warning" | "error" }[]>([]);
   const [dryRun, setDryRun] = useState(true);
   const [readData, setReadData] = useState(false);
   const [policy, setPolicy] = useState({ keepLast: 3, keepDaily: 7, keepWeekly: 4, keepMonthly: 6 });
@@ -155,18 +155,35 @@ function App() {
   /** Invoke run_restic with active credentials and options. Ignore calls while busy; clear previous output, record up to 20 completed process results, and show a success, warning, or error notice. Return the result on exit code 0, otherwise null. Extra options override the standard request fields. */
   async function run(operation: string, extra: Record<string, unknown> = {}, throwErrors = false) {
     if (busy) return null;
+    const dryRun = extra.dryRun === true;
+    const backupPreview = operation === "backup" && dryRun;
+    const retentionPreview = operation === "forget" && dryRun;
+    const label = backupPreview ? "backup preview" : retentionPreview ? "retention preview" : operation;
     setCancelling(false); setCancelError("");
-    setBusy(operation); setNotice(""); setNoticeTone("error"); setOutput("");
+    setBusy(label); setNotice(""); setNoticeTone("error"); setOutput("");
     try {
       if (!desktop) throw new Error("Open the desktop app with npm run tauri dev to run restic. Browser mode only previews the interface.");
       const result = await invoke<Result>("run_restic", { request: { repository: profile.repository, password, passwordFile: profile.passwordFile, operation, maintenance: profile.maintenance, paths: lines(profile.sources), excludes: lines(profile.excludes), tags: lines(profile.tags), snapshot: selected, ...policy, confirmation, ...extra } });
       setOutput([result.stdout, result.stderr].filter(Boolean).join("\n"));
-      setActivity(a => [{ operation, time: new Date().toLocaleTimeString(), code: result.code }, ...a].slice(0, 20));
+      const incomplete = operation === "backup" && result.code === 3 && !result.interruptedMaintenance;
+      const tone: typeof noticeTone = result.code === 0 ? "success" : incomplete || result.code === 130 || (operation === "snapshots" && result.code === 10) ? "warning" : "error";
+      const outcome = result.interruptedMaintenance
+        ? `Backup completed; maintenance ${result.code === 130 ? "cancelled" : `failed (exit ${result.code})`}`
+        : incomplete ? "Incomplete · Exit 3" : result.code === 130 ? "Cancelled" : `Exit ${result.code}`;
+      setActivity(a => [{ operation: label, time: new Date().toLocaleTimeString(), result: outcome, tone }, ...a].slice(0, 20));
+      if (result.interruptedMaintenance) {
+        setNoticeTone(tone);
+        setNotice(`Backup completed. Automatic ${result.interruptedMaintenance} ${result.code === 130 ? "was cancelled" : `failed with exit ${result.code}`}. Review Operation output.`);
+        setStats(null); setPreview("");
+        return null;
+      }
       if (result.code === 130) {
         setNoticeTone("warning");
         setNotice(operation === "snapshots"
           ? connected ? "Repository refresh cancelled." : "Repository connection cancelled."
-          : `${operation} cancelled. Changes already made are not undone. Refresh repository data before continuing.`);
+          : dryRun ? `${label} cancelled.`
+          : `${label} cancelled. Changes already made are not undone. Refresh repository data before continuing.`);
+        if (dryRun) return null;
         setConnected(false); setSnapshots([]); setSelected(""); setBrowserOpen(false); setStats(null); setPreview("");
         return null;
       }
@@ -180,11 +197,14 @@ function App() {
         return null;
       }
       if (result.code !== 0) {
-        setNoticeTone(result.code === 3 ? "warning" : "error");
-        throw new Error(result.code === 3 ? "Backup was incomplete: some source files could not be read. Review the output." : `restic ${operation} exited with code ${result.code}. ${result.stderr || "Review the output."}`);
+        setNoticeTone(tone);
+        throw new Error(incomplete ? `${backupPreview ? "Backup preview" : "Backup"} incomplete. Some source files could not be read. Review Operation output.` : `restic ${label} exited with code ${result.code}. ${result.stderr || "Review the output."}`);
       }
       setNoticeTone("success");
-      if (operation !== "snapshots") setNotice(`${operation} completed successfully.`);
+      if (operation !== "snapshots") setNotice(backupPreview ? "Backup preview completed. No snapshot was created."
+        : retentionPreview ? "Retention preview ready. Expand Operation output to review it."
+        : operation === "backup" ? (profile.maintenance ? "Backup and automatic maintenance completed." : "Backup completed.")
+        : `${operation} completed successfully.`);
       return result;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -195,7 +215,6 @@ function App() {
     }
     finally { setBusy(""); setCancelling(false); }
   }
-  /** Run snapshots and parse its JSON array. Mark the repository connected only on successful parsing, then clear the snapshot selection, file listing, and retention preview. */
   /** Request cancellation of the current app-owned restic operation. */
   async function cancelOperation() {
     setCancelling(true); setCancelError("");
@@ -219,6 +238,7 @@ function App() {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally { setBusy(""); setCancelling(false); }
   }
+  /** Mark the repository connected only after reading its snapshot list. */
   async function refresh() {
     if (busy) return;
     setRepositoryMissing(false);
@@ -394,10 +414,10 @@ function App() {
           <div className="retention-grid">{(["keepLast", "keepDaily", "keepWeekly", "keepMonthly"] as const).map((key, i) => <label key={key}>{["Keep last", "Daily", "Weekly", "Monthly"][i]}<input type="number" min="0" max="10000" value={profile.maintenance![key]} onChange={e => update("maintenance", { ...profile.maintenance!, [key]: Math.max(0, Math.min(10000, Math.trunc(Number(e.target.value)))) })} /></label>)}</div>
           <p className="result-warning">Automatic retention deletes snapshots outside this policy; pruning reclaims their unused storage. Keep at least one retention count above zero.</p>
         </>}
-      </section><section className="card form-card"><h2>Verify repository</h2><p>Structural checks validate repository metadata. Reading all data also validates stored pack contents and can take much longer.</p><label className="checkbox"><input type="checkbox" role="switch" checked={readData} onChange={e => setReadData(e.target.checked)} /> Read and verify all stored data</label><button onClick={() => void run("check", { readData })}>Run integrity check</button></section><section className="card form-card"><h2>Snapshot retention</h2><p>Keep recovery points per host and source-path group. Preview the policy before removing any snapshots.</p><div className="retention-grid">{(Object.keys(policy) as (keyof typeof policy)[]).map((k,i) => <label key={k}>{["Keep last", "Daily", "Weekly", "Monthly"][i]}<input type="number" min="0" max="10000" value={policy[k]} onChange={e => { setPolicy({ ...policy, [k]: Math.max(0, Math.min(10000, Math.trunc(Number(e.target.value)))) }); setPreview(""); }} /></label>)}</div><div className="actions"><button onClick={async () => { const r = await run("forget", { dryRun: true }); setPreview(r ? policyKey : ""); setConfirmation(""); if (r) setNotice("Retention preview ready. Expand Operation output to review it."); }}>Preview retention</button><label>Type FORGET to confirm<input value={confirmation} onChange={e => setConfirmation(e.target.value)} autoComplete="off" /></label><button className="danger" disabled={preview !== policyKey || confirmation !== "FORGET"} onClick={async () => { const r = await run("forget"); setPreview(""); setConfirmation(""); if (r) { setSnapshots([]); setSelected(""); setBrowserOpen(false); setStats(null); setConnected(false); } }}>Apply retention</button></div></section><section className="card form-card"><h2>Reclaim unused storage</h2><p>Prune permanently removes data no longer referenced by snapshots. Run after reviewing and applying retention.</p><button className="danger" onClick={() => { if (window.prompt("Permanently reclaim unused data? Type PRUNE to continue.") === "PRUNE") void run("prune", { confirmation: "PRUNE" }); }}>Prune repository</button></section></>}
+      </section><section className="card form-card"><h2>Verify repository</h2><p>Structural checks validate repository metadata. Reading all data also validates stored pack contents and can take much longer.</p><label className="checkbox"><input type="checkbox" role="switch" checked={readData} onChange={e => setReadData(e.target.checked)} /> Read and verify all stored data</label><button onClick={() => void run("check", { readData })}>Run integrity check</button></section><section className="card form-card"><h2>Snapshot retention</h2><p>Keep recovery points per host and source-path group. Preview the policy before removing any snapshots.</p><div className="retention-grid">{(Object.keys(policy) as (keyof typeof policy)[]).map((k,i) => <label key={k}>{["Keep last", "Daily", "Weekly", "Monthly"][i]}<input type="number" min="0" max="10000" value={policy[k]} onChange={e => { setPolicy({ ...policy, [k]: Math.max(0, Math.min(10000, Math.trunc(Number(e.target.value)))) }); setPreview(""); }} /></label>)}</div><div className="actions"><button onClick={async () => { const r = await run("forget", { dryRun: true }); setPreview(r ? policyKey : ""); setConfirmation(""); }}>Preview retention</button><label>Type FORGET to confirm<input value={confirmation} onChange={e => setConfirmation(e.target.value)} autoComplete="off" /></label><button className="danger" disabled={preview !== policyKey || confirmation !== "FORGET"} onClick={async () => { const r = await run("forget"); setPreview(""); setConfirmation(""); if (r) { setSnapshots([]); setSelected(""); setBrowserOpen(false); setStats(null); setConnected(false); } }}>Apply retention</button></div></section><section className="card form-card"><h2>Reclaim unused storage</h2><p>Prune permanently removes data no longer referenced by snapshots. Run after reviewing and applying retention.</p><button className="danger" onClick={() => { if (window.prompt("Permanently reclaim unused data? Type PRUNE to continue.") === "PRUNE") void run("prune", { confirmation: "PRUNE" }); }}>Prune repository</button></section></>}
       </fieldset>
       {tab === "Backup" && <SchedulePanel key={profile.id} profile={profile} busy={!!busy} beforeSave={flushScheduleProfiles} />}
-      <details className="card output-card"><summary>Operation output</summary><pre tabIndex={0}>{output || "Command output will appear here when an operation finishes."}</pre>{activity.length > 0 && <details><summary>Recent operations ({activity.length})</summary>{activity.map((a,i) => <div className="activity" key={i}><span>{a.time} · {a.operation}</span><span className={`result-${a.code === 0 ? "success" : (a.code === 3 || a.code === 130) ? "warning" : "error"}`}>{a.code === 0 ? "Completed" : a.code === 130 ? "Cancelled" : `Exit ${a.code}`}</span></div>)}</details>}</details>
+      <details className="card output-card"><summary>Operation output</summary><pre tabIndex={0}>{output || "Command output will appear here when an operation finishes."}</pre>{activity.length > 0 && <details><summary>Recent operations ({activity.length})</summary>{activity.map((a,i) => <div className="activity" key={i}><span>{a.time} · {a.operation}</span><span className={`result-${a.tone}`}>{a.result}</span></div>)}</details>}</details>
       {browserOpen && chosen && <SnapshotBrowser key={`${active}:${chosen.id}:${mounted?.snapshot === chosen.id && mounted.repository === profile.repository ? mounted.path : "repository"}`} snapshot={chosen}
         loadDirectory={loadDirectory} busy={!!busy} mountBusy={mountBusy}
         mountError={mountError} unmount={mounted ? () => void mountAction("stop") : undefined} cancel={cancelOperation} cancelling={cancelling} mountedPath={mounted?.snapshot === chosen.id && mounted.repository === profile.repository ? mounted.path : undefined} mount={() => void mountAction("start", chosen.id)}

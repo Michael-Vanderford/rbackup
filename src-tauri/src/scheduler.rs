@@ -777,8 +777,13 @@ fn run_job(id: &str) -> Result<i32, String> {
         })?;
         #[cfg(target_os = "linux")]
         {
-            print!("{}", result.stdout);
             eprint!("{}", result.stderr);
+            // Captured progress arrives all at once and can exhaust the journal's rate limit.
+            for line in result.stdout.lines() {
+                if !line.starts_with(r#"{"message_type":"status""#) {
+                    println!("{line}");
+                }
+            }
         }
         #[cfg(windows)]
         windows::write_output(id, &result)?;
@@ -808,7 +813,8 @@ fn run_job(id: &str) -> Result<i32, String> {
             )
         }
         _ => match code {
-            0 => "Backup and any configured automatic maintenance completed.",
+            0 if current_operation == "prune" => "Backup and automatic maintenance completed.",
+            0 => "Backup completed.",
             3 => "Backup incomplete: some files could not be read.",
             130 => "Backup cancelled; completed changes are not undone.",
             _ => "Backup failed. Review the scheduled-run output.",

@@ -85,6 +85,8 @@ pub struct Output {
     pub stdout: String,
     pub stderr: String,
     pub code: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interrupted_maintenance: Option<String>,
 }
 
 /// Validate a snapshot identifier as 8 through 64 ASCII hexadecimal characters. Return a user-facing error for invalid identifiers.
@@ -344,6 +346,7 @@ pub(crate) fn execute_with(
         let next = match run(&step, arguments(&step)?) {
             Ok(output) => output,
             Err(error) => Output {
+                interrupted_maintenance: None,
                 stdout: String::new(),
                 stderr: error,
                 code: 1,
@@ -356,6 +359,7 @@ pub(crate) fn execute_with(
         result.stderr.push_str(&next.stderr);
         result.code = next.code;
         if next.code != 0 {
+            result.interrupted_maintenance = Some(step.operation.clone());
             result.stderr.push_str(&format!("\nBackup completed; automatic {} failed or was cancelled. Remaining maintenance skipped.\n", step.operation));
         }
     }
@@ -417,6 +421,7 @@ fn capture_command(mut command: Command, cancelled: &AtomicBool) -> Result<Outpu
     };
     if cancelled.load(Ordering::SeqCst) || SIGNAL_CANCELLED.load(Ordering::SeqCst) {
         return Ok(Output {
+            interrupted_maintenance: None,
             stdout: String::new(),
             stderr: "Operation cancelled.".into(),
             code: 130,
@@ -482,6 +487,7 @@ fn capture_command(mut command: Command, cancelled: &AtomicBool) -> Result<Outpu
         .map_err(|_| "Error reader failed.")?
         .map_err(|e| e.to_string())?;
     Ok(Output {
+        interrupted_maintenance: None,
         stdout: String::from_utf8_lossy(&stdout).into_owned(),
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
         code: if interrupted.is_some() {
@@ -638,6 +644,7 @@ mod tests {
         execute_with(&r, |step, _| {
             calls.push(step.operation.clone());
             Ok(Output {
+                interrupted_maintenance: None,
                 stdout: String::new(),
                 stderr: String::new(),
                 code: 0,
@@ -909,6 +916,7 @@ mod tests {
                 assert!(args.iter().any(|arg| arg.contains("BatchMode=yes")));
                 operations.push(step.operation.clone());
                 Ok(Output {
+                    interrupted_maintenance: None,
                     stdout: String::new(),
                     stderr: String::new(),
                     code: 0,
@@ -986,6 +994,7 @@ mod tests {
             ("backup", 3, vec!["unlock", "backup"]),
             ("backup", 130, vec!["unlock", "backup"]),
             ("check", 1, vec!["unlock", "backup", "check"]),
+            ("check", 3, vec!["unlock", "backup", "check"]),
             ("forget", 1, vec!["unlock", "backup", "check", "forget"]),
             ("check", 130, vec!["unlock", "backup", "check"]),
         ] {
@@ -1000,6 +1009,7 @@ mod tests {
                     assert!(!args.contains(&"--dry-run".into()));
                 }
                 Ok(Output {
+                    interrupted_maintenance: None,
                     stdout: step.operation.clone(),
                     stderr: String::new(),
                     code: if step.operation == failed { code } else { 0 },
@@ -1008,12 +1018,17 @@ mod tests {
             .unwrap();
             assert_eq!(calls, expected);
             assert_eq!(result.code, code);
+            assert_eq!(
+                result.interrupted_maintenance.as_deref(),
+                matches!(failed, "check" | "forget" | "prune").then_some(failed)
+            );
         }
         r.dry_run = true;
         let mut calls = Vec::new();
         execute_with(&r, |step, _| {
             calls.push(step.operation.clone());
             Ok(Output {
+                interrupted_maintenance: None,
                 stdout: String::new(),
                 stderr: String::new(),
                 code: 0,
@@ -1038,6 +1053,7 @@ mod tests {
         execute_with(&r, |step, _| {
             calls.push(step.operation.clone());
             Ok(Output {
+                interrupted_maintenance: None,
                 stdout: String::new(),
                 stderr: String::new(),
                 code: 0,
@@ -1059,6 +1075,7 @@ mod tests {
                 assert_eq!(request.repository, r.repository);
                 calls.push(request.operation.clone());
                 Ok(Output {
+                    interrupted_maintenance: None,
                     stdout: "[]".into(),
                     stderr: String::new(),
                     code: 0,
@@ -1087,6 +1104,7 @@ mod tests {
                     .any(|pair| pair == ["--password-file", "/tmp/password"])
             );
             Ok(Output {
+                interrupted_maintenance: None,
                 stdout: String::new(),
                 stderr: "access denied".into(),
                 code: 1,
@@ -1099,6 +1117,7 @@ mod tests {
         let missing = execute_with(&r, |request, _| {
             assert_eq!(request.operation, "unlock");
             Ok(Output {
+                interrupted_maintenance: None,
                 stdout: String::new(),
                 stderr: "repository does not exist".into(),
                 code: 10,

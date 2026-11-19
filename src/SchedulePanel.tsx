@@ -14,7 +14,6 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
     const pending = useRef(0);
     const revision = useRef(0);
     const [cancelling, setCancelling] = useState(false);
-    const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const desktop = isTauri();
 
@@ -44,7 +43,7 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
 
     function save(next: Schedule) {
         setSchedule(next);
-        setSaving(true); setError(""); setMessage("");
+        setSaving(true); setError("");
         pending.current++;
         const current = ++revision.current;
         saves.current = saves.current.then(async () => {
@@ -71,11 +70,10 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
         });
     }
     async function cancel() {
-        setCancelling(true); setError(""); setMessage("");
+        setCancelling(true); setError("");
         try {
             await schedulerAction("cancel", profile.id);
             setStatus(await schedulerAction<ScheduleStatus>("status", profile.id));
-            setMessage("Scheduled backup stopped. Completed changes are not undone.");
         } catch (error) { setError(String(error)); }
         finally { setCancelling(false); }
     }
@@ -102,7 +100,6 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
         {run && <p>{run.message}</p>}
         {status?.serviceError && <p role="alert" className="result-error">{status.serviceError}</p>}
         {status?.active && <button className="danger" disabled={cancelling || saving} onClick={() => void cancel()}>{cancelling ? "Cancelling…" : "Cancel scheduled backup"}</button>}
-        {message && <p role="status" className="result-success">{message}</p>}
         {error && <p role="alert" className="result-error">{error}</p>}
         <details><summary>Recent scheduled-run output</summary><pre tabIndex={0}>{status?.logs || "Scheduled backup output will appear here."}</pre></details>
     </section>;
