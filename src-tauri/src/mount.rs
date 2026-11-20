@@ -38,25 +38,48 @@ impl Drop for Mounted {
         while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
         }
+        let files = self.root.join("files");
         if !matches!(self.child.try_wait(), Ok(Some(_))) {
-            for executable in ["fusermount3", "fusermount"] {
-                if std::process::Command::new(executable)
-                    .arg("-u")
-                    .arg(self.root.join("files"))
-                    .status()
-                    .is_ok_and(|s| s.success())
-                {
-                    break;
-                }
-            }
+            unmount_files(&files);
             let _ = self.child.kill();
         }
         let _ = self.child.wait();
-        let _ = std::fs::remove_dir(self.root.join("files"));
+        #[cfg(target_os = "macos")]
+        if std::fs::remove_dir(&files).is_err() && files.exists() {
+            // A FUSE or network mount can outlive a failed or killed restic process.
+            unmount_files(&files);
+        }
+        let _ = std::fs::remove_dir(&files);
         let _ = std::fs::remove_file(self.root.join("error.log"));
         let _ = std::fs::remove_dir(&self.root);
     }
 }
+
+#[cfg(target_os = "linux")]
+fn unmount_files(files: &Path) {
+    for executable in ["fusermount3", "fusermount"] {
+        if std::process::Command::new(executable)
+            .arg("-u")
+            .arg(files)
+            .status()
+            .is_ok_and(|status| status.success())
+        {
+            break;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn unmount_files(files: &Path) {
+    let _ = std::process::Command::new("/sbin/umount")
+        .arg(files)
+        .status();
+}
+
+#[cfg(target_os = "linux")]
+const FUSE_REQUIREMENT: &str = "Install Linux FUSE and fusermount3 or fusermount.";
+#[cfg(target_os = "macos")]
+const FUSE_REQUIREMENT: &str = "Install FUSE-T or macFUSE and finish its macOS setup.";
 
 impl MountState {
     pub fn stop(&self) {
@@ -96,7 +119,9 @@ pub fn action(
         .try_lock()
         .map_err(|_| "A mount operation is already running.")?;
     // Reap failed/disconnected mounts before reporting their state.
-    if let Some(mounted) = state.as_mut() {
+    if action != "stop"
+        && let Some(mounted) = state.as_mut()
+    {
         if mounted
             .child
             .try_wait()
@@ -109,7 +134,19 @@ pub fn action(
     match action {
         "status" => {}
         "stop" => {
-            state.take();
+            if let Some(mounted) = state.take() {
+                let files = mounted.root.join("files");
+                drop(mounted);
+                match std::fs::symlink_metadata(&files) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    _ => {
+                        return Err(format!(
+                            "Could not clean up the mount at {}. Close any open files and unmount it manually.",
+                            files.display()
+                        ));
+                    }
+                }
+            }
         }
         "start" => {
             let r = request.ok_or("Repository and snapshot are required.")?;
@@ -180,14 +217,16 @@ pub fn action(
                         let error = std::fs::read_to_string(mounted.root.join("error.log"))
                             .unwrap_or_default();
                         return Err(format!(
-                            "Mount failed ({status}). Linux FUSE and fusermount3/fusermount must be installed.\n{error}"
+                            "Mount failed ({status}). {FUSE_REQUIREMENT}\n{error}"
                         ));
                     }
                     if Path::new(&mounted.info.path).is_dir() {
                         break;
                     }
                     if Instant::now() >= deadline {
-                        return Err("Mount did not become ready within 30 seconds. Check the connection and FUSE installation.".into());
+                        return Err(format!(
+                            "Mount did not become ready within 30 seconds. Check the repository connection. {FUSE_REQUIREMENT}"
+                        ));
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }
@@ -308,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires native Linux FUSE and restic; uses only a disposable repository"]
+    #[ignore = "requires native FUSE and restic; uses only a disposable repository"]
     fn real_fuse_mount_exposes_selected_snapshot_and_unmounts() {
         use std::sync::atomic::AtomicBool;
         let base = std::env::temp_dir().join(format!(
@@ -319,8 +358,10 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
+        std::fs::create_dir_all(&base).unwrap();
+        let base = base.canonicalize().unwrap();
         let source = base.join("source");
-        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("sample.txt"), "mounted contents").unwrap();
         let mut request = test_request(&base.join("repository"));
         let mut run = |operation: &str| {
@@ -386,14 +427,18 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(100));
         }
+        let mounted_file = snapshot_path
+            .join(source.strip_prefix("/").unwrap())
+            .join("sample.txt");
         assert_eq!(
-            std::fs::read_to_string(
-                snapshot_path
-                    .join(source.strip_prefix("/").unwrap())
-                    .join("sample.txt")
-            )
-            .unwrap(),
+            std::fs::read_to_string(&mounted_file).unwrap(),
             "mounted contents"
+        );
+        assert!(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(mounted_file)
+                .is_err()
         );
         drop(mounted);
         assert!(!files.exists(), "mountpoint must be unmounted and removed");

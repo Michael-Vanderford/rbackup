@@ -11,6 +11,13 @@ use std::{
 
 #[cfg(target_os = "linux")]
 use std::process::Command;
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{cancel, status};
+#[cfg(target_os = "macos")]
+use macos::{remove_locked, save_locked, stop};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
@@ -101,7 +108,7 @@ fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn home() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -109,7 +116,7 @@ fn home() -> Result<PathBuf, String> {
         .ok_or("Cannot locate the user's home directory.".into())
 }
 fn root() -> Result<PathBuf, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     return Ok(home()?.join(".local/share/tauri-backup-manager"));
     #[cfg(windows)]
     return std::env::var_os("LOCALAPPDATA")
@@ -357,7 +364,10 @@ fn executable(path: &Path) -> bool {
         })
 }
 fn resolve_restic() -> Result<PathBuf, String> {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+    let path = std::env::var_os("PATH");
+    #[cfg(target_os = "macos")]
+    let path = Some(restic::macos_command_path(path.as_deref()));
+    std::env::split_paths(&path.unwrap_or_default())
         .map(|p| {
             p.join(if cfg!(windows) {
                 "restic.exe"
@@ -376,7 +386,7 @@ fn app_executable() -> Result<PathBuf, String> {
         .map(Ok)
         .unwrap_or_else(std::env::current_exe)
         .map_err(|e| e.to_string())?;
-    #[cfg(windows)]
+    #[cfg(not(target_os = "linux"))]
     let path = std::env::current_exe().map_err(|e| e.to_string())?;
     if !executable(&path) {
         return Err("The app executable must be an existing absolute executable path.".into());
@@ -686,12 +696,12 @@ pub fn status(id: &str) -> Result<Status, String> {
     })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 extern "C" fn signal_cancel(_: libc::c_int) {
     restic::SIGNAL_CANCELLED.store(true, Ordering::SeqCst);
 }
 /// Register async-signal-safe cancellation before loading or waiting on scheduled work.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn install_signals() -> Result<(), String> {
     // SAFETY: handler only updates a lock-free atomic; sigaction structs are fully initialized.
     unsafe {
@@ -719,7 +729,7 @@ pub fn run(id: &str) -> i32 {
 }
 fn run_job(id: &str) -> Result<i32, String> {
     validate_id(id)?;
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     install_signals()?;
     #[cfg(windows)]
     let _watch = windows::watch_cancel(id)?;
@@ -738,6 +748,8 @@ fn run_job(id: &str) -> Result<i32, String> {
     write_json(&state_file, &state)?;
     let mut current_operation = String::new();
     let result = (|| {
+        #[cfg(target_os = "macos")]
+        macos::clear_output(id)?;
         let _lock = coordination::acquire(&operation_lock()?, true, &restic::SIGNAL_CANCELLED)?;
         if restic::SIGNAL_CANCELLED.load(Ordering::SeqCst) {
             return Ok(130);
@@ -775,7 +787,7 @@ fn run_job(id: &str) -> Result<i32, String> {
                 &current.restic_path,
             )
         })?;
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             eprint!("{}", result.stderr);
             // Captured progress arrives all at once and can exhaust the journal's rate limit.
@@ -785,6 +797,8 @@ fn run_job(id: &str) -> Result<i32, String> {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
+        macos::write_output(id, &result)?;
         #[cfg(windows)]
         windows::write_output(id, &result)?;
         Ok::<i32, String>(result.code)

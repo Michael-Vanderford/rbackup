@@ -282,7 +282,7 @@ pub fn execute(r: Request) -> Result<Output, String> {
     let cancelled = Arc::new(AtomicBool::new(false));
     *CANCELLATION.lock().map_err(|e| e.to_string())? = Some(cancelled.clone());
     let result = (|| {
-        #[cfg(any(target_os = "linux", windows))]
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
         let _process_lock =
             crate::coordination::acquire(&crate::scheduler::operation_lock()?, false, &cancelled)?;
         execute_with(&r, |request, args| {
@@ -393,10 +393,29 @@ pub(crate) fn run_command(
     Ok(result)
 }
 
+// Finder launches apps without the PATH additions from shell startup files.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+pub(crate) fn macos_command_path(inherited: Option<&std::ffi::OsStr>) -> std::ffi::OsString {
+    let inherited = inherited.into_iter().flat_map(std::env::split_paths);
+    std::env::join_paths(
+        inherited.chain(
+            ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+                .into_iter()
+                .map(std::path::PathBuf::from),
+        ),
+    )
+    .expect("PATH entries contain no path separators")
+}
+
 /// Build app-owned restic processes with identical credential and SSH handling.
 pub(crate) fn command(r: &Request, args: &[String], executable: &Path) -> Command {
     let mut command = Command::new(executable);
     command.args(args).stdin(Stdio::null());
+    #[cfg(target_os = "macos")]
+    command.env(
+        "PATH",
+        macos_command_path(std::env::var_os("PATH").as_deref()),
+    );
     // Do not accidentally run a password command inherited from the launching shell.
     command
         .env_remove("RESTIC_PASSWORD_COMMAND")
@@ -501,6 +520,20 @@ fn capture_command(mut command: Command, cancelled: &AtomicBool) -> Result<Outpu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn macos_command_path_preserves_inherited_precedence() {
+        let path = macos_command_path(Some(std::ffi::OsStr::new("/custom/bin:/usr/bin")));
+        assert_eq!(
+            path,
+            "/custom/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        );
+        assert_eq!(
+            macos_command_path(None),
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        );
+    }
+
     fn request(repository: &Path, operation: &str) -> Request {
         serde_json::from_value(serde_json::json!({
             "repository": repository.to_str().unwrap(), "password": "test-only-password",

@@ -1,5 +1,5 @@
 //! Headless smoke tests use disposable homes/repositories and never activate a timer.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -351,6 +351,7 @@ fn makes_real_scheduled_snapshots_with_a_password_file() {
 }
 
 /// Installs only uniquely named runtime units; requires a real systemd user bus.
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "installs disposable runtime user units; requires a systemd user session"]
 fn systemd_user_timer_runs_closed_app_and_catches_up() {

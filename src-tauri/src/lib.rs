@@ -1,12 +1,12 @@
 use tauri::Manager;
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod coordination;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod mount;
 mod password_file;
 mod restic;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod scheduler;
 #[cfg(desktop)]
 mod window_state;
@@ -21,14 +21,14 @@ pub fn headless(args: &[String]) -> Option<i32> {
         eprintln!("Usage: --scheduled-backup <profile-id>");
         return Some(2);
     }
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
         Some(scheduler::run(&args[1]))
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         eprintln!(
-            "Scheduled backups require Linux systemd user services or Windows Task Scheduler."
+            "Scheduled backups require Linux systemd user services, macOS launchd, or Windows Task Scheduler."
         );
         Some(2)
     }
@@ -42,7 +42,7 @@ async fn scheduler_action(
     profile: Option<serde_json::Value>,
     schedule: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
         tauri::async_runtime::spawn_blocking(move || {
             match action.as_str() {
@@ -75,13 +75,13 @@ async fn scheduler_action(
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = (profile_id, profile, schedule);
         if action == "sync" || action == "remove" {
             return Ok(serde_json::Value::Null);
         }
-        Err("Scheduled backups require Linux systemd user services or Windows Task Scheduler. Manual backups remain available.".into())
+        Err("Scheduled backups require Linux systemd user services, macOS launchd, or Windows Task Scheduler. Manual backups remain available.".into())
     }
 }
 
@@ -105,7 +105,7 @@ async fn snapshot_mount(
     action: String,
     request: Option<restic::Request>,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         tauri::async_runtime::spawn_blocking(move || {
             mount::action(&app, &action, request)
@@ -114,10 +114,10 @@ async fn snapshot_mount(
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (app, action, request);
-        Err("Snapshot mounting currently requires Linux and FUSE. Use the snapshot browser to restore files on this platform.".into())
+        Err("Snapshot mounting requires Linux or macOS with FUSE. Use the snapshot browser to restore files on this platform.".into())
     }
 }
 
@@ -127,7 +127,7 @@ async fn snapshot_mount_entries(
     snapshot: String,
     directory: String,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         tauri::async_runtime::spawn_blocking(move || {
             mount::entries(&app, &snapshot, &directory)
@@ -136,10 +136,10 @@ async fn snapshot_mount_entries(
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (app, snapshot, directory);
-        Err("Snapshot mounting currently requires Linux and FUSE.".into())
+        Err("Snapshot mounting requires Linux or macOS with FUSE.".into())
     }
 }
 
@@ -165,7 +165,7 @@ async fn create_password_file(
 /// Initialize Tauri, register the opener plugin and run_restic command, then enter the application event loop. Panics if the Tauri application cannot run.
 pub fn run() {
     let builder = tauri::Builder::default();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let builder = builder.manage(mount::MountState::default());
     #[cfg(desktop)]
     let builder = builder.setup(window_state::setup);
@@ -182,11 +182,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<mount::MountState>().stop();
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             let _ = (app, event);
         });
 }

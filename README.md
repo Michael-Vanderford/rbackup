@@ -6,7 +6,7 @@ A Tauri 2 desktop interface for restic, built with React and TypeScript. Uses re
 
 <!-- ![Backup workflow: choose files, create encrypted snapshots, and restore; optional automatic integrity checks, retention, and pruning follow successful backups.](docs/images/backup-flow.svg) -->
 
-*Backup workflow overview. Scheduled backups use Linux systemd user timers or Windows Task Scheduler.*
+*Backup workflow overview. Scheduled backups use Linux systemd user timers, macOS launchd, or Windows Task Scheduler.*
 
 ![rbackup in dark mode, showing a connected repository, snapshot count, latest backup, and repository health controls.](docs/images/screenshot.png)
 
@@ -59,6 +59,22 @@ Install restic separately and make `restic.exe` available on PATH on the destina
 
 Linux builds do not produce Windows installers by default. MSI requires Windows; cross-compiling an NSIS installer requires additional tooling described in the [Tauri Windows installer guide](https://v2.tauri.app/distribute/windows-installer/).
 
+### macOS build
+
+On a Mac, install Node.js, Rust, and the [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/#macos). With Homebrew installed, run these commands from the project root:
+
+```sh
+brew install restic
+npm ci
+npm run tauri -- build --bundles app,dmg
+```
+
+The app bundle and disk image are under `src-tauri/target/release/bundle/`. Install `rclone` with Homebrew if you use an rclone repository. The app searches the inherited PATH followed by the standard Homebrew and macOS binary directories, including when launched from Finder.
+
+To check an installed build, open rbackup from Finder, select **Check restic version**, then preview a backup, create a snapshot, and restore a file using a disposable local repository.
+
+The [macOS GitHub Actions workflow](.github/workflows/macos.yml) runs the frontend and Rust tests, including disposable headless backups, and builds unsigned debug app bundles and disk images on Apple Silicon and Intel. Public DMGs require Developer ID signing and notarization. See [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/macos/).
+
 ## Workflow
 
 1. Open **Repository**, enter the repository location, and supply a session password or an absolute password-file path. Select **Connect**. If restic reports that the location has no repository, **Initialize new repository** becomes available. This detection requires restic 0.17.0 or newer.
@@ -93,9 +109,19 @@ Run `npm test` for the frontend tests, including profile settings, log formattin
 
 ## Current limits
 
-Operations execute off the UI thread. On Linux and Windows, manual and scheduled operations share a cross-process lock; scheduled jobs wait while manual operations report when another app operation is busy. **Logs** shows formatted operation output after completion, recent operations, and scheduled-run output for the selected profile. Expand **Raw output** to see the original text. Use **Cancel operation** to stop an app-owned restic operation. Keep the app open until the operation finishes or cancellation completes. Activity history is session-only and output is held in memory. Snapshot browsing opens in a dedicated dialog with an expandable folder tree and checkboxes. Folder contents load lazily and remain cached while the browser is open; large folders reveal another 100 items at a time. Select individual files or entire folders, then use the single **Restore selected** action. A checked folder includes its descendants; unchecking a child preserves the other selected contents. The root checkbox selects the entire snapshot. Original paths are preserved within the destination. Browsing skips the stale-lock cleanup subprocess. Use arrow keys to navigate the tree, Right/Left to expand/collapse, and Space to toggle a selection. Paths are typed rather than selected with native dialogs. Scheduling is available through systemd user timers on Linux and Task Scheduler on Windows. No keychain, repair, manual unlock, copy or key-management workflow yet.
+Operations execute off the UI thread. On Linux, macOS, and Windows, manual and scheduled operations share a cross-process lock; scheduled jobs wait while manual operations report when another app operation is busy. **Logs** shows formatted operation output after completion, recent operations, and scheduled-run output for the selected profile. Expand **Raw output** to see the original text. Use **Cancel operation** to stop an app-owned restic operation. Keep the app open until the operation finishes or cancellation completes. Activity history is session-only and output is held in memory. Snapshot browsing opens in a dedicated dialog with an expandable folder tree and checkboxes. Folder contents load lazily and remain cached while the browser is open; large folders reveal another 100 items at a time. Select individual files or entire folders, then use the single **Restore selected** action. A checked folder includes its descendants; unchecking a child preserves the other selected contents. The root checkbox selects the entire snapshot. Original paths are preserved within the destination. Browsing skips the stale-lock cleanup subprocess. Use arrow keys to navigate the tree, Right/Left to expand/collapse, and Space to toggle a selection. Paths are typed rather than selected with native dialogs. Scheduling is available through systemd user timers on Linux, launchd on macOS, and Task Scheduler on Windows. No keychain, repair, manual unlock, copy or key-management workflow yet.
 
-On Linux, **Mount snapshot** uses restic’s read-only FUSE mount. Copy the displayed path to browse it manually in your file manager. Install FUSE and `fusermount3` (or `fusermount`) first. The repository is mounted in a private temporary directory (`/tmp/rbackup-mount-…/files` on Linux); other snapshots are available under `ids/`. One repository can be mounted at a time. The workspace banner’s **Browse mounted snapshot** opens the same checkbox tree directly from the FUSE mount. Its full path is displayed with a **Copy path** action. Snapshot symbolic links are displayed without following their targets. Use **Unmount** in the browser or workspace banner before repository maintenance; restic’s live repository lock protects mounted data from pruning. Mounts are stopped on normal app exit; a forced kill or crash may require a manual `fusermount3 -u <mountpoint>` (the mountpoint is the `files` directory above `ids/`). Mounting is currently unavailable on Windows and macOS; the built-in browser and restores remain available.
+**Mount snapshot** uses Restic’s read-only FUSE mount on Linux and macOS. On Linux, install FUSE and `fusermount3` or `fusermount`. On macOS, install FUSE-T or macFUSE and complete its setup. The [Restic mount documentation](https://restic.readthedocs.io/en/stable/050_restore.html#restoring-using-mount) links to both macOS options.
+
+The repository is mounted in a private temporary directory. The workspace banner’s **Browse mounted snapshot** opens it in the app, and **Copy path** lets you open the selected snapshot in your file manager. In Finder, use **Go → Go to Folder** and paste the path. Snapshot symbolic links are displayed without following their targets. One repository can be mounted at a time.
+
+Use **Unmount** before repository maintenance. Restic’s live repository lock protects mounted data from pruning. The app also unmounts on normal exit. After a crash or forced quit, the mountpoint is the `files` directory above `ids/`. To unmount it manually, use `/sbin/umount <mountpoint>` on macOS or `fusermount3 -u <mountpoint>` on Linux. Windows supports the built-in snapshot browser and restores.
+
+To test a macOS mount, use a disposable repository with a known file. Confirm that the file opens from the mounted snapshot in Finder, unmount in rbackup, and check that the mount path disappears. Mount again and quit the app to check exit cleanup. The opt-in smoke test exercises the Restic mount command, read-only access, and cleanup on a machine with FUSE installed.
+
+```sh
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib mount::tests::real_fuse_mount_exposes_selected_snapshot_and_unmounts -- --ignored --exact
+```
 
 See [implementation plan](docs/PLAN.md) and [review notes](docs/REVIEW.md) for decisions, validation results and next steps.
 
@@ -184,3 +210,11 @@ In **Maintenance → Automatic maintenance**, enable **After each successful bac
 After a successful manual or scheduled backup, the app runs `restic check`, then `restic forget` with the saved automatic retention policy, then `restic prune`. This policy is separate from the manual retention preview controls. Automatic retention deletes snapshots outside the policy and pruning reclaims their unreferenced data. At least one retention count must be positive; invalid policies stop the operation before backup begins. Check uses metadata validation unless reading all data is enabled.
 
 Restic can continue past unreadable files and save a partial snapshot of the readable data. An incomplete backup (exit 3) shows a warning with details in the operation or scheduled-run output. Dry runs, failed backups, incomplete backups, and cancelled backups skip maintenance. A failed or cancelled maintenance step stops all later steps. Backup and maintenance share the operation lock and cancellation handling. Results and output include maintenance; a maintenance failure does not undo the completed backup. Scheduled maintenance runs in the same headless job as the backup, using its saved password file on Linux and Windows.
+
+## Scheduled backups on macOS
+
+Install rbackup in `/Applications` or another stable location. In **Repository**, select or create a password file. In **Backup → Backup schedule**, choose a daily or weekly local time and enable the schedule. Each enabled profile installs a LaunchAgent in `~/Library/LaunchAgents`. Jobs can run with rbackup closed while you are signed in, and launchd can catch up on calendar events missed during sleep. If rbackup moves, save the schedule again from its new location.
+
+The schedule panel shows the last result and recent output from the last scheduled run. If macOS denies access to a source or destination, review the scheduled-run output and the relevant privacy or background item settings in System Settings. Schedule metadata and the operation lock are stored under `~/.local/share/tauri-backup-manager/`.
+
+To test with a disposable repository, enable a schedule, quit rbackup, and run `launchctl kickstart "gui/$(id -u)/com.michael.backup-manager.schedule.<profile-id>"` with the ID from the LaunchAgent filename. Reopen rbackup to verify the snapshot and logs. Test cancellation during a longer run, then disable the schedule and check that its LaunchAgent file has been removed.
