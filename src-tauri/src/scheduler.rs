@@ -815,7 +815,9 @@ fn run_job(id: &str) -> Result<i32, String> {
         _ => match code {
             0 if current_operation == "prune" => "Backup and automatic maintenance completed.",
             0 => "Backup completed.",
-            3 => "Backup incomplete: some files could not be read.",
+            3 if current_operation == "backup" => {
+                "Backup continued with unreadable files skipped. Review the scheduled-run output for the errors."
+            }
             130 => "Backup cancelled; completed changes are not undone.",
             _ => "Backup failed. Review the scheduled-run output.",
         }

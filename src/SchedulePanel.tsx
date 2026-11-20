@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import type { Profile } from "./profiles";
 import { defaultSchedule, schedulerAction, type Schedule, type ScheduleStatus } from "./scheduler";
+import OperationOutput from "./OperationOutput";
 
 /** Autosave one repository’s schedule and poll the native scheduler. */
-export default function SchedulePanel({ profile, busy, beforeSave }: { profile: Profile; busy: boolean; beforeSave: () => Promise<void> }) {
+export default function SchedulePanel({ profile, busy, beforeSave, showLogs, openLogs }: { profile: Profile; busy: boolean; beforeSave: () => Promise<void>; showLogs: boolean; openLogs: () => void }) {
     const [schedule, setSchedule] = useState(defaultSchedule);
     const [status, setStatus] = useState<ScheduleStatus | null>(null);
     const [loaded, setLoaded] = useState(false);
@@ -78,6 +79,11 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
         finally { setCancelling(false); }
     }
     const run = status?.lastRun;
+    if (showLogs) return <section className="card output-card">
+        <h2>Scheduled-run output</h2>
+        {error && <p role="alert" className="result-error">{error}</p>}
+        <OperationOutput output={status?.logs ?? ""} empty={status?.reason || "Scheduled backup output for this profile will appear here."} />
+    </section>;
     const tone = run?.state === "success" ? "success" : run?.state === "failed" ? "error" : run?.state === "running" || run?.state === "waiting" ? "progress" : "warning";
     return <section className="card form-card schedule-card" aria-labelledby="schedule-heading">
         <div className="card-heading"><h2 id="schedule-heading">Backup schedule</h2><span className={`badge schedule-status status-${!status ? "progress" : !status.available ? "warning" : status.schedule.enabled ? "success" : "warning"}`} role="status">{!status ? "LOADING" : !status.available ? "UNAVAILABLE" : status.schedule.enabled ? "ENABLED" : "DISABLED"}</span></div>
@@ -101,6 +107,6 @@ export default function SchedulePanel({ profile, busy, beforeSave }: { profile: 
         {status?.serviceError && <p role="alert" className="result-error">{status.serviceError}</p>}
         {status?.active && <button className="danger" disabled={cancelling || saving} onClick={() => void cancel()}>{cancelling ? "Cancelling…" : "Cancel scheduled backup"}</button>}
         {error && <p role="alert" className="result-error">{error}</p>}
-        <details><summary>Recent scheduled-run output</summary><pre tabIndex={0}>{status?.logs || "Scheduled backup output will appear here."}</pre></details>
+        {status?.logs && <button className="open-logs" onClick={openLogs}>Open scheduled-run logs</button>}
     </section>;
 }

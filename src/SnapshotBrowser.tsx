@@ -108,7 +108,7 @@ export default function SnapshotBrowser({ snapshot, loadDirectory, restore, busy
   async function doRestore() {
     if (!selection.size || !target.trim() || locked || loading.size) return;
     setRestoring(true); setRestored(false); setError("");
-    try { const done = await restore([...selection], target.trim()); setRestored(done); if (!done) setError("Restore did not complete. Review the operation output."); }
+    try { const done = await restore([...selection], target.trim()); setRestored(done); if (!done) setError("Restore did not complete. Close this dialog and open Logs for details."); }
     catch (error) { setError(String(error)); }
     finally { setRestoring(false); }
   }

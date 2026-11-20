@@ -113,6 +113,10 @@ for arg do
  case "$arg" in
  unlock|backup|check|forget|prune)
   echo "$arg" >> "$HOME/operations"
+  if [ "$arg" = backup ] && [ -f "$HOME/incomplete-backup" ]; then
+   echo 'lost+found: permission denied' >&2
+   exit 3
+  fi
   if [ "$arg" = check ] && [ -f "$HOME/fail-check" ]; then exit 1; fi
   exit 0
   ;;
@@ -153,6 +157,29 @@ exit 2
             .as_str()
             .unwrap()
             .contains("automatic check failed")
+    );
+
+    fs::remove_file(fixture.home.join("operations")).unwrap();
+    fs::write(fixture.home.join("incomplete-backup"), "").unwrap();
+    let output = fixture
+        .command("maintenance")
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lost+found: permission denied"));
+    assert_eq!(
+        fs::read_to_string(fixture.home.join("operations")).unwrap(),
+        "unlock\nbackup\n"
+    );
+    let state = fixture.state("maintenance").unwrap();
+    assert_eq!(state["state"], "incomplete");
+    assert_eq!(state["code"], 3);
+    assert!(
+        state["message"]
+            .as_str()
+            .unwrap()
+            .contains("unreadable files skipped")
     );
 }
 
@@ -268,19 +295,59 @@ fn makes_real_scheduled_snapshots_with_a_password_file() {
     );
     fixture.configure("real", &executable, true);
     assert_eq!(wait(&mut fixture.command("real").spawn().unwrap()), 0);
-    let output = Command::new(&executable)
-        .arg("--repo")
-        .arg(fixture.home.join("repository"))
-        .arg("--password-file")
-        .arg(fixture.home.join("password"))
-        .args(["--no-cache", "--json", "snapshots"])
-        .env_remove("RESTIC_PASSWORD_COMMAND")
-        .output()
-        .unwrap();
+    let restic = |args: &[&str]| {
+        Command::new(&executable)
+            .arg("--repo")
+            .arg(fixture.home.join("repository"))
+            .arg("--password-file")
+            .arg(fixture.home.join("password"))
+            .args(["--no-cache", "--json"])
+            .args(args)
+            .env_remove("RESTIC_PASSWORD_COMMAND")
+            .output()
+            .unwrap()
+    };
+    let output = restic(&["snapshots"]);
     assert!(output.status.success());
     let snapshots: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0]["tags"], json!(["scheduled", "test"]));
+
+    let unreadable = fixture.home.join("source/lost+found");
+    fs::create_dir(&unreadable).unwrap();
+    fs::write(unreadable.join("unreadable.txt"), "skip this file").unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(&unreadable).is_ok() {
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700)).unwrap();
+        eprintln!("process can bypass directory permissions; skipping real read-error check");
+        return;
+    }
+
+    fs::write(
+        fixture.home.join("source/added.txt"),
+        "saved despite read errors",
+    )
+    .unwrap();
+    let output = fixture.command("real").stderr(Stdio::piped()).output();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700)).unwrap();
+    let output = output.unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lost+found"));
+    assert_eq!(fixture.state("real").unwrap()["state"], "incomplete");
+
+    let output = restic(&["snapshots"]);
+    assert!(output.status.success());
+    let snapshots_after: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(snapshots_after.len(), 2);
+    let partial = snapshots_after
+        .iter()
+        .find(|snapshot| snapshot["id"] != snapshots[0]["id"])
+        .unwrap();
+    let output = restic(&["ls", partial["id"].as_str().unwrap()]);
+    assert!(output.status.success());
+    let listing = String::from_utf8(output.stdout).unwrap();
+    assert!(listing.contains("\"name\":\"added.txt\""));
+    assert!(!listing.contains("\"name\":\"unreadable.txt\""));
 }
 
 /// Installs only uniquely named runtime units; requires a real systemd user bus.
